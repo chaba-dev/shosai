@@ -271,6 +271,43 @@ void main() {
   );
 
   test(
+    'refresh repairs a corrupt or incompatible public cache using a validated replacement',
+    () async {
+      await client.refresh();
+      final file = File('${client.directory}/catalog.sqlite3');
+      for (final damage in ['bytes', 'version', 'metadata']) {
+        now = now.add(const Duration(days: 1));
+        if (damage == 'bytes') {
+          file.writeAsBytesSync([1, 2, 3, 4]);
+        } else {
+          final db = sqlite3.open(file.path);
+          try {
+            db.execute(
+              damage == 'version'
+                  ? 'PRAGMA user_version = 999'
+                  : 'DELETE FROM catalog_metadata',
+            );
+          } finally {
+            db.close();
+          }
+        }
+        final damaged = file.readAsBytesSync();
+        final partition = File('${snapshot.path}/books/0.json');
+        final valid = partition.readAsBytesSync();
+        partition.writeAsStringSync('invalid');
+        await expectLater(client.refresh(), throwsA(isA<FormatException>()));
+        expect(file.readAsBytesSync(), damaged);
+        partition.writeAsBytesSync(valid);
+        now = now.add(const Duration(days: 1));
+        final before = requests.length;
+        expect(await client.refresh(), CatalogRefresh.installed);
+        expect(requests.length - before, 25);
+        expect((await client.search(query: 'Pride')).single.id, 'pride');
+      }
+    },
+  );
+
+  test(
     'verified bytes with invalid relationships or inventory counts cannot replace installed data',
     () async {
       await client.refresh();

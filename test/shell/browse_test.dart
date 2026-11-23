@@ -160,6 +160,95 @@ void main() {
   }
 
   testWidgets(
+    'Add refreshes personal matches; first Read works during shelf refresh and rail Search stays in the reader',
+    (tester) async {
+      const HarnessView(size: Size(1440, 900)).apply(tester);
+      final bridge = _AcquiringBridge(catalog);
+      await tester.pumpWidget(
+        productionShell(
+          home: ProductShell(
+            bridgeFactory: () => bridge,
+            readerBuilder: (_, book, _, _, _, _, _, _, _, _) =>
+                Scaffold(body: Center(child: Text('Reading ${book.title}'))),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(ShellSidebar),
+              matching: find.text('Search'),
+            )
+            .last,
+      );
+      await until(
+        tester,
+        () => find
+            .byKey(const ValueKey('browse-search-field'))
+            .evaluate()
+            .isNotEmpty,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('browse-search-field')),
+        'Pride',
+      );
+      ShellBrowsePage page() => tester.widget(find.byType(ShellBrowsePage));
+      await until(
+        tester,
+        () =>
+            !page().model.busy &&
+            !page().model.refreshing &&
+            !page().local.busy &&
+            page().model.books.length == 1,
+      );
+      expect(page().local.books, isEmpty);
+      await tester.tap(find.text('Pride and Prejudice').first);
+      await until(tester, () => page().model.saveOptions != null);
+      await tester.ensureVisible(find.text('Add to library'));
+      await tester.tap(find.text('Add to library'));
+      const added = FlutterLibraryBook(
+        bookId: 999,
+        title: 'Pride and Prejudice',
+        format: FlutterBookFormat.epub,
+        pathKey: '/test/added.epub',
+        managed: true,
+        progress: 0,
+        dateAdded: '2026-11-20',
+      );
+      bridge.books.add(added);
+      bridge.shelfRefresh = Completer<void>();
+      addTearDown(() {
+        if (!bridge.shelfRefresh!.isCompleted) bridge.shelfRefresh!.complete();
+      });
+      bridge.pending.complete((book: added, existing: false));
+      await until(
+        tester,
+        () => find.text('Read').evaluate().isNotEmpty && !page().local.busy,
+      );
+      expect(page().local.books.map((b) => b.bookId), [999]);
+      expect(find.text('Reading Pride and Prejudice'), findsNothing);
+      await tester.ensureVisible(find.text('Read'));
+      await tester.pumpAndSettle();
+      await capture(tester, 'catalog-review-added');
+      await tester.tap(find.text('Read'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reading Pride and Prejudice'), findsOneWidget);
+      // The background shelf request is still held: no second Read tap needed.
+      expect(bridge.shelfRefresh!.isCompleted, false);
+      await tester.tap(find.byTooltip('Search').first);
+      await tester.pumpAndSettle();
+      expect(find.byType(ShellSearchPalette), findsOneWidget);
+      expect(find.text('Reading Pride and Prejudice'), findsOneWidget);
+      expect(find.byType(ShellBrowsePage), findsNothing);
+      await capture(tester, 'catalog-review-reader-search');
+      bridge.shelfRefresh!.complete();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
     'Search navigation queries the local catalog and selects edition rights',
     (tester) async {
       const HarnessView(size: Size(1280, 900)).apply(tester);
@@ -543,8 +632,30 @@ void main() {
 }
 
 class _AcquiringBridge extends CatalogHarnessBridge {
-  _AcquiringBridge(super.catalog);
+  _AcquiringBridge(super.catalog) : super(books: [...harnessLibraryBooks()]);
   Completer<CatalogAddedBook> pending = Completer<CatalogAddedBook>();
+  Completer<void>? shelfRefresh;
+
+  @override
+  Future<FlutterLibraryPage> libraryPage({
+    String? query,
+    FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
+    required int limit,
+    required int offset,
+    required BigInt cancellationId,
+  }) async {
+    if ((query ?? '').isEmpty) await shelfRefresh?.future;
+    return super.libraryPage(
+      query: query,
+      format: format,
+      sort: sort,
+      limit: limit,
+      offset: offset,
+      cancellationId: cancellationId,
+    );
+  }
+
   @override
   Future<CatalogAddedBook> addCatalogBook({
     required String bookId,

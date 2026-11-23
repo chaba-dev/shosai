@@ -15,6 +15,7 @@ import 'editions.dart';
 import 'files.dart';
 import 'inspection.dart';
 import 'location.dart';
+import 'records.dart';
 
 typedef LocatedContent = ({BookLocator locator, LocationFailure? failure});
 
@@ -212,7 +213,50 @@ final class LibraryLocations {
     LocationEntry entry,
     String hash, {
     bool inheritPreview = true,
-  }) => _store.transaction((db) {
+  }) => _store.transaction(
+    (db) => _admit(db, id, generation, entry, hash, inheritPreview),
+  );
+
+  /// A published download must never commit a book without its durable locator.
+  /// A retry can adopt the external file and repair an older partial admission
+  /// while keeping the content identity, reading state and notes.
+  Future<({Book book, bool existing})> importPublished(
+    String path,
+    BookFormat format,
+    FileFingerprint fingerprint,
+    BookMetadata metadata,
+    String id,
+    int generation,
+    List<LocationEntry> entries,
+  ) => _store.transaction((db) {
+    if (entries.isEmpty) {
+      throw const CoreException.invalidRequest('A published file is required.');
+    }
+    final result = LibraryRecords.commitPublishedInTransaction(
+      db,
+      canonicalBookPath(path),
+      format,
+      fingerprint,
+      metadata,
+    );
+    for (final entry in entries) {
+      _locate(db, fingerprint.hash, (
+        locationId: id,
+        key: entry.key,
+      ), generation);
+      _admit(db, id, generation, entry, fingerprint.hash, false);
+    }
+    return (book: result.book, existing: result.duplicate);
+  });
+
+  static bool _admit(
+    Database db,
+    String id,
+    int generation,
+    LocationEntry entry,
+    String hash,
+    bool inheritPreview,
+  ) {
     if (!_hasGeneration(db, id, generation)) {
       throw const LocationException(LocationFailure.revoked);
     }
@@ -262,7 +306,7 @@ final class LibraryLocations {
       [hash],
     );
     return grouped;
-  });
+  }
 
   /// Source files whose books were removed from the library, newest first.
   /// Their files are untouched in their locations; a scan leaves them off the
@@ -495,28 +539,32 @@ final class LibraryLocations {
     String contentHash,
     BookLocator locator, {
     required int generation,
-  }) async {
+  }) =>
+      _store.transaction((db) => _locate(db, contentHash, locator, generation));
+
+  static void _locate(
+    Database db,
+    String contentHash,
+    BookLocator locator,
+    int generation,
+  ) {
     _checkText(locator.key, 16384);
-    final accepted = await _store.transaction((db) {
-      if (!_hasGeneration(db, locator.locationId, generation)) return false;
-      if (db.select('SELECT 1 FROM books WHERE content_hash = ?', [
-        contentHash,
-      ]).isEmpty) {
-        throw const CoreException.notFound(
-          'The content is not in the library.',
-        );
-      }
-      db.execute(
-        '''INSERT INTO book_locators
+    if (!_hasGeneration(db, locator.locationId, generation)) {
+      throw const LocationException(LocationFailure.revoked);
+    }
+    if (db.select('SELECT 1 FROM books WHERE content_hash = ?', [
+      contentHash,
+    ]).isEmpty) {
+      throw const CoreException.notFound('The content is not in the library.');
+    }
+    db.execute(
+      '''INSERT INTO book_locators
              (content_hash, location_id, locator_key, failure)
            VALUES (?, ?, ?, NULL)
            ON CONFLICT(content_hash, location_id, locator_key)
            DO UPDATE SET failure = NULL''',
-        [contentHash, locator.locationId, locator.key],
-      );
-      return true;
-    });
-    if (!accepted) throw const LocationException(LocationFailure.revoked);
+      [contentHash, locator.locationId, locator.key],
+    );
   }
 
   Future<List<LocatedContent>> copies(String contentHash) => _store.read(

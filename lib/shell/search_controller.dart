@@ -76,6 +76,8 @@ class ShellSearchController extends ChangeNotifier {
         if (filter == _model.filter) return;
         _emit(_model.copyWith(filter: filter));
         _search(immediately: true);
+      case ShellSearchRefreshed():
+        _search(immediately: true);
       case _ShellSearchDue(:final revision):
         if (revision == _revision) _start(revision);
       case _ShellSearchNotesFound(:final revision, :final books):
@@ -319,6 +321,11 @@ final class ShellSearchModel {
 
 sealed class ShellSearchMessage {
   const ShellSearchMessage();
+}
+
+/// The personal library changed without changing the active search criteria.
+final class ShellSearchRefreshed extends ShellSearchMessage {
+  const ShellSearchRefreshed();
 }
 
 final class ShellSearchMoreTitlesRequested extends ShellSearchMessage {

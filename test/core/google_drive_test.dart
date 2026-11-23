@@ -180,6 +180,16 @@ void main() {
         limit: 3,
       );
       expect(next.entries.single.key, 'B');
+      final occupied = await location.listForSave(directory: 'books', limit: 3);
+      expect(occupied.entries.map((e) => e.key), ['A', 'folder', 'shortcut']);
+      expect(occupied.entries.map((e) => e.readable), [true, true, false]);
+      final occupiedNext = await location.listForSave(
+        directory: 'books',
+        cursor: occupied.nextCursor,
+        limit: 3,
+      );
+      expect(occupiedNext.entries.map((e) => e.key), ['B', 'doc']);
+      expect(occupiedNext.entries.map((e) => e.readable), [true, false]);
       expect(media, 0);
     },
   );

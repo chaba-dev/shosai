@@ -261,6 +261,15 @@ final class LibraryFolders {
     await _preferences.set('device.library.save-location', id ?? 'private');
   });
 
+  /// Bind an acquisition to the selected grant before its network download.
+  Future<({int generation, String? directory})?> saveDestination(String? id) =>
+      _serial(() async {
+        await _load();
+        if (id == null) return null;
+        final grant = _grant(id);
+        return (generation: _generations[id]!, directory: grant.directory);
+      });
+
   /// The downloaded bytes are verified before any external publication. A
   /// duplicate is an idempotent Add, not an instruction to open the reader.
   /// Grant changes and other admissions cannot interleave with publication.
@@ -271,13 +280,24 @@ final class LibraryFolders {
     required String title,
     required String? author,
     required BookFormat format,
+    ({int generation, String? directory})? destination,
     CancellationToken? cancellation,
   }) => _serial(() async {
     await _load(cancellation: cancellation);
     cancellation.throwIfCancelled();
+    if (locationId != null &&
+        destination != null &&
+        (_generations[locationId] != destination.generation ||
+            _grant(locationId).directory != destination.directory)) {
+      throw const CoreException.conflict(
+        'The save location changed. Choose it again before adding the book.',
+      );
+    }
     final fingerprint = await fingerprintFile(path, cancellation: cancellation);
     final known = await _library.withContent(fingerprint.hash);
-    if (known != null) return (book: known, existing: true);
+    if (known != null && (known.located || await File(known.path).exists())) {
+      return (book: known, existing: true);
+    }
     if (locationId == null) {
       final item = await _library.importFile(
         path,
@@ -305,7 +325,7 @@ final class LibraryFolders {
         'This location cannot safely save new books.',
       );
     }
-    await _library.inspectFile(path, format, cancellation);
+    final metadata = await _library.inspectFile(path, format, cancellation);
     if (!await fingerprint.unchangedSince(path)) {
       throw const CoreException.conflict('The downloaded file changed.');
     }
@@ -321,7 +341,10 @@ final class LibraryFolders {
       final entries = await _saveEntries(adapter, folder.key, cancellation);
       matches = [];
       for (final entry in entries.where(
-        (e) => !e.isDirectory && bookNameKey(e.name) == bookNameKey(plain),
+        (e) =>
+            e.readable &&
+            !e.isDirectory &&
+            bookNameKey(e.name) == bookNameKey(plain),
       )) {
         final current = await adapter.stat(
           entry.key,
@@ -399,27 +422,16 @@ final class LibraryFolders {
     }
     // Publication/adoption is the commit boundary. Do not cancel between
     // admitting these bytes and associating their durable provider locations.
-    final item = await _library.importFile(path, managed: false);
+    final item = await _locations.importPublished(
+      path,
+      format,
+      fingerprint,
+      metadata,
+      locationId,
+      _generations[locationId]!,
+      matches,
+    );
     final book = item.book;
-    if (book == null) {
-      throw CoreException.malformed(
-        item.error ?? 'The book could not be added.',
-      );
-    }
-    final generation = _generations[locationId]!;
-    for (final entry in matches) {
-      await _locations.locate(book.contentHash, (
-        locationId: locationId,
-        key: entry.key,
-      ), generation: generation);
-      await _locations.admit(
-        locationId,
-        generation,
-        entry,
-        book.contentHash,
-        inheritPreview: false,
-      );
-    }
     await _cache.withFile(book, () => File(path).openRead(), (_) async {});
     _catalog = List.unmodifiable(
       _catalog.where(
@@ -428,7 +440,7 @@ final class LibraryFolders {
             !matches.any((e) => e.key == file.entry.key),
       ),
     );
-    return (book: (await _library.get(book.id))!, existing: item.duplicate);
+    return (book: (await _library.get(book.id))!, existing: item.existing);
   });
 
   Future<List<LocationEntry>> _saveEntries(
@@ -444,12 +456,19 @@ final class LibraryFolders {
       if (!cursors.add(cursor)) {
         throw const CoreException.malformed('Repeated destination page.');
       }
-      final page = await location.list(
-        directory: directory,
-        cursor: cursor,
-        limit: 500,
-        cancellation: cancellation,
-      );
+      final page = location is LibrarySaveInventory
+          ? await (location as LibrarySaveInventory).listForSave(
+              directory: directory,
+              cursor: cursor,
+              limit: 500,
+              cancellation: cancellation,
+            )
+          : await location.list(
+              directory: directory,
+              cursor: cursor,
+              limit: 500,
+              cancellation: cancellation,
+            );
       entries.addAll(page.entries);
       if (entries.length > maxDiscoveryEntries) {
         throw const CoreException.limitExceeded(

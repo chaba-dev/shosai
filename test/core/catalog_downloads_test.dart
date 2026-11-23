@@ -37,6 +37,7 @@ void main() {
   late HttpServer server;
   late List<int> bytes;
   var responseCode = 200;
+  var compressed = false;
   Completer<void>? wait;
   late Completer<void> arrived;
 
@@ -56,6 +57,7 @@ void main() {
       'packages/shosai_core/test/fixtures/sample.epub',
     ).readAsBytesSync();
     responseCode = 200;
+    compressed = false;
     wait = null;
     arrived = Completer<void>();
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -73,8 +75,12 @@ void main() {
           'http://insecure.example/book.epub',
         );
       } else {
-        request.response.contentLength = bytes.length;
-        request.response.add(bytes);
+        final body = compressed ? gzip.encode(bytes) : bytes;
+        if (compressed) {
+          request.response.headers.set('Content-Encoding', 'gzip');
+        }
+        request.response.contentLength = body.length;
+        request.response.add(body);
       }
       await request.response.close();
     });
@@ -217,6 +223,161 @@ void main() {
     },
   );
 
+  for (final repair in [false, true]) {
+    test(
+      'failed local admission rolls back and retry adopts published bytes (repair: $repair)',
+      () async {
+        final target = await connect();
+        Book? previous;
+        if (repair) {
+          final stage = File('${root.path}/old-stage.epub')
+            ..writeAsBytesSync(bytes);
+          previous = (await library.importFile(
+            stage.path,
+            managed: false,
+          )).book!;
+          await library.updateProgress(previous.id, 0.375);
+          stage.deleteSync();
+        }
+        await store.transaction(
+          (db) => db.execute(
+            "CREATE TRIGGER fault BEFORE INSERT ON book_locators BEGIN SELECT RAISE(ABORT, 'fixture storage failure'); END",
+          ),
+        );
+        await expectLater(
+          add(location: 'folder'),
+          throwsA(isA<CoreException>()),
+        );
+        expect((await library.page()).books, hasLength(repair ? 1 : 0));
+        final published = File(
+          '${target.path}/Project Gutenberg/Pride and Prejudice - Jane Austen.epub',
+        );
+        final modified = published.statSync().modified;
+        await store.transaction((db) => db.execute('DROP TRIGGER fault'));
+        final saved = await add(location: 'folder');
+        expect((await library.page()).books, hasLength(1));
+        expect(saved.existing, repair);
+        if (repair) {
+          expect(saved.book.id, previous!.id);
+          expect(saved.book.progress, 0.375);
+        }
+        expect(published.statSync().modified, modified);
+        expect(published.parent.listSync(), hasLength(1));
+        expect(
+          await folders.withBookFile(
+            saved.book,
+            (path) => File(path).readAsBytes(),
+          ),
+          bytes,
+        );
+      },
+    );
+  }
+
+  test(
+    'changing the selected directory during download requires reselection and writes nowhere',
+    () async {
+      final target = await connect();
+      for (final name in ['Original', 'Changed']) {
+        Directory('${target.path}/$name').createSync();
+      }
+      await folders.configure(
+        'folder',
+        directory: 'Original',
+        label: 'Original',
+      );
+      wait = Completer<void>();
+      final pending = add(location: 'folder');
+      final failure = expectLater(
+        pending,
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.conflict,
+          ),
+        ),
+      );
+      await arrived.future;
+      await folders.configure('folder', directory: 'Changed', label: 'Changed');
+      wait!.complete();
+      await failure;
+      expect(Directory('${target.path}/Original').listSync(), isEmpty);
+      expect(Directory('${target.path}/Changed').listSync(), isEmpty);
+      expect((await library.page()).books, isEmpty);
+      final saved = await add(location: 'folder');
+      expect(
+        await folders.withBookFile(
+          saved.book,
+          (path) => File(path).readAsBytes(),
+        ),
+        bytes,
+      );
+      expect(Directory('${target.path}/Original').listSync(), isEmpty);
+    },
+  );
+
+  test(
+    'gzip transfers validate decoded book bytes rather than wire length',
+    () async {
+      compressed = true;
+      expect(gzip.encode(bytes).length, isNot(bytes.length));
+      final saved = await add();
+      expect(File(saved.book.path).readAsBytesSync(), bytes);
+      expect((await library.page()).books, hasLength(1));
+    },
+  );
+
+  test(
+    'unsupported destination items reserve portable names without being read or adopted',
+    () async {
+      final target = await connect();
+      final adapter = _InterceptSave(
+        await FolderLocation.open('folder', target.path),
+        true,
+        occupied: [
+          LocationEntry(
+            key: 'unsupported-item',
+            name: 'PRIDE AND PREJUDICE - JANE AUSTEN.EPUB',
+            isDirectory: false,
+            size: bytes.length,
+            readable: false,
+          ),
+        ],
+      );
+      await folders.close();
+      folders = LibraryFolders(
+        Preferences(store),
+        library,
+        LibraryLocations(store),
+        () async => '${root.path}/stage',
+        BookFileCache(store, '${root.path}/cache'),
+        providers: [_SaveProvider(adapter)],
+      );
+      final result = await folders.saveDownloadedBook(
+        'packages/shosai_core/test/fixtures/sample.epub',
+        locationId: 'folder',
+        source: 'Project Gutenberg',
+        title: 'Pride and Prejudice',
+        author: 'Jane Austen',
+        format: BookFormat.epub,
+      );
+      expect(
+        File(
+          '${target.path}/Project Gutenberg/Pride and Prejudice - Jane Austen (2).epub',
+        ).readAsBytesSync(),
+        bytes,
+      );
+      expect(
+        await folders.withBookFile(
+          result.book,
+          (path) => File(path).readAsBytes(),
+        ),
+        bytes,
+      );
+    },
+  );
+
   for (final lateCancel in [false, true]) {
     test(
       'save ${lateCancel ? 'finishes association after late cancellation' : 'adopts a concurrent identical publication without a suffix'}',
@@ -324,10 +485,11 @@ class _SaveProvider implements ConnectionProvider {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-class _InterceptSave implements LibrarySaveLocation {
-  _InterceptSave(this.location, this.lateCancel);
+class _InterceptSave implements LibrarySaveLocation, LibrarySaveInventory {
+  _InterceptSave(this.location, this.lateCancel, {this.occupied = const []});
   final LibrarySaveLocation location;
   final bool lateCancel;
+  final List<LocationEntry> occupied;
   var first = true;
   @override
   String get id => location.id;
@@ -343,6 +505,25 @@ class _InterceptSave implements LibrarySaveLocation {
     limit: limit,
     cancellation: cancellation,
   );
+  @override
+  Future<LocationPage> listForSave({
+    String? directory,
+    String? cursor,
+    int limit = 100,
+    CancellationToken? cancellation,
+  }) async {
+    final page = await list(
+      directory: directory,
+      cursor: cursor,
+      limit: limit,
+      cancellation: cancellation,
+    );
+    return LocationPage([
+      ...page.entries,
+      ...occupied,
+    ], nextCursor: page.nextCursor);
+  }
+
   @override
   Future<LocationEntry> stat(String key, {CancellationToken? cancellation}) =>
       location.stat(key, cancellation: cancellation);

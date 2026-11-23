@@ -50,6 +50,7 @@ final class CatalogDownloads {
         'This catalog edition is not available for download.',
       );
     }
+    final destination = await folders.saveDestination(locationId);
     final staging = Directory(await newPath());
     cancellation.throwIfCancelled();
     await staging.create();
@@ -70,6 +71,7 @@ final class CatalogDownloads {
       return await folders.saveDownloadedBook(
         file.path,
         locationId: locationId,
+        destination: destination,
         source: source,
         title: details.book.title,
         author: details.book.authors.firstOrNull,
@@ -121,7 +123,10 @@ final class CatalogDownloads {
         if (response.statusCode != 200) {
           throw const LocationException(LocationFailure.offline);
         }
-        final total = response.contentLength < 0
+        final total =
+            response.compressionState ==
+                    HttpClientResponseCompressionState.decompressed ||
+                response.contentLength < 0
             ? null
             : response.contentLength;
         if (total != null && total > maxBookInputBytes) {

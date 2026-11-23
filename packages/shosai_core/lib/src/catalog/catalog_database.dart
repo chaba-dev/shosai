@@ -47,20 +47,27 @@ typedef CatalogBookDetails = ({
 
 bool catalogMatches(String path, CatalogManifest candidate) {
   if (!File(path).existsSync()) return false;
-  return _read(path, (db) {
-    final installed = CatalogManifest.parse(
-      db.select('SELECT manifest FROM catalog_metadata').single['manifest']
-          as String,
-    );
-    return installed.files.length == candidate.files.length &&
-        installed.files.entries.every(
-          (e) => candidate.files[e.key] == e.value,
-        ) &&
-        installed.sourceCounts.length == candidate.sourceCounts.length &&
-        installed.sourceCounts.entries.every(
-          (e) => candidate.sourceCounts[e.key] == e.value,
-        );
-  });
+  try {
+    return _read(path, (db) {
+      final rows = db.select('SELECT manifest FROM catalog_metadata');
+      if (rows.length != 1 || rows.single['manifest'] is! String) return false;
+      final installed = CatalogManifest.parse(
+        rows.single['manifest'] as String,
+      );
+      return installed.files.length == candidate.files.length &&
+          installed.files.entries.every(
+            (e) => candidate.files[e.key] == e.value,
+          ) &&
+          installed.sourceCounts.length == candidate.sourceCounts.length &&
+          installed.sourceCounts.entries.every(
+            (e) => candidate.sourceCounts[e.key] == e.value,
+          );
+    });
+  } on SqliteException {
+    return false;
+  } on FormatException {
+    return false;
+  }
 }
 
 void importCatalog(String stage, String manifestText) {

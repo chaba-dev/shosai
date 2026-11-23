@@ -819,7 +819,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   ShellActions get _shellActions => ShellActions(
-    selectPlace: (place) => _shell.dispatch(ShellPlaceSelected(place)),
+    selectPlace: (place) => place == ShellPlace.search
+        ? unawaited(_openSearch())
+        : _shell.dispatch(ShellPlaceSelected(place)),
     openBook: (open) => _shell.model.reading
         ? _shell.dispatch(ShellBookActivated(open.id))
         : controller.dispatch(LibraryBookOpened(open.book)),

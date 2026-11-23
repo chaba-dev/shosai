@@ -1285,9 +1285,22 @@ final class ApplicationBridge
   Future<CatalogSaveOptions> catalogSaveOptions() => records._guard(() async {
     if (records._closed) throw const CoreException.cancelled();
     final options = await folders.saveOptions();
+    final labels = [
+      for (final g in options.locations)
+        [
+          g.label,
+          g.directoryLabel,
+        ].whereType<String>().where((label) => label.isNotEmpty).join(' — '),
+    ];
     return (
       locations: [
-        for (final g in options.locations) (id: g.id, label: g.label),
+        for (var i = 0; i < options.locations.length; i++)
+          (
+            id: options.locations[i].id,
+            label: labels.where((label) => label == labels[i]).length == 1
+                ? labels[i]
+                : '${labels[i]} (${labels.take(i + 1).where((label) => label == labels[i]).length})',
+          ),
       ],
       selected: options.selected,
     );

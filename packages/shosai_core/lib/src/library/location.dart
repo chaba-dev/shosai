@@ -31,6 +31,7 @@ final class LocationEntry {
     this.sha256,
     this.dropboxContentHash,
     this.createdAt,
+    this.readable = true,
   });
 
   final String key;
@@ -49,6 +50,9 @@ final class LocationEntry {
   final String? sha256;
   final String? dropboxContentHash;
   final DateTime? createdAt;
+
+  /// Unsupported provider objects still occupy names when saving new books.
+  final bool readable;
 }
 
 /// One bounded, nonrecursive directory listing.
@@ -131,6 +135,17 @@ abstract interface class LibrarySaveLocation implements LibraryLocation {
   Future<LocationEntry> createDirectory(
     String name, {
     String? directory,
+    CancellationToken? cancellation,
+  });
+}
+
+/// Providers whose discovery omits unsupported objects expose a complete save
+/// inventory separately. Unreadable entries reserve names but cannot be adopted.
+abstract interface class LibrarySaveInventory {
+  Future<LocationPage> listForSave({
+    String? directory,
+    String? cursor,
+    int limit = 100,
     CancellationToken? cancellation,
   });
 }

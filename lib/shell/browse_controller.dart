@@ -318,12 +318,12 @@ class BrowseController extends ChangeNotifier {
       case _BrowseAdded(:final revision, :final id, :final result):
         // A committed save still belongs on the shelf after leaving details.
         _libraryChanged?.call();
+        local.dispatch(const ShellSearchRefreshed());
         if (revision == _detailRevision && id == _addCancellation) {
           _addCancellation = null;
           _emit(
             _model.copyWith(acquisition: BrowseAcquisition(result: result)),
           );
-          _searchLocal();
         }
       case _BrowseAddFailed(:final revision, :final id):
         if (revision == _detailRevision && id == _addCancellation) {

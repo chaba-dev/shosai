@@ -213,7 +213,8 @@ final class DriveTransport {
   }
 }
 
-final class GoogleDriveLocation implements LibrarySaveLocation {
+final class GoogleDriveLocation
+    implements LibrarySaveLocation, LibrarySaveInventory {
   GoogleDriveLocation(this.id, this.transport);
 
   @override
@@ -241,6 +242,7 @@ final class GoogleDriveLocation implements LibrarySaveLocation {
     revision: file['version']?.toString(),
     sha256: file['sha256Checksum'] as String?,
     createdAt: DateTime.tryParse(file['createdTime'] as String? ?? ''),
+    readable: _supported(file),
   );
 
   static bool _supported(Map<String, dynamic> file) =>
@@ -253,6 +255,33 @@ final class GoogleDriveLocation implements LibrarySaveLocation {
     String? cursor,
     int limit = 100,
     CancellationToken? cancellation,
+  }) => _list(
+    directory: directory,
+    cursor: cursor,
+    limit: limit,
+    cancellation: cancellation,
+  );
+
+  @override
+  Future<LocationPage> listForSave({
+    String? directory,
+    String? cursor,
+    int limit = 100,
+    CancellationToken? cancellation,
+  }) => _list(
+    directory: directory,
+    cursor: cursor,
+    limit: limit,
+    cancellation: cancellation,
+    includeUnsupported: true,
+  );
+
+  Future<LocationPage> _list({
+    String? directory,
+    String? cursor,
+    required int limit,
+    CancellationToken? cancellation,
+    bool includeUnsupported = false,
   }) async {
     if (limit < 1 || limit > 1000 || (cursor?.length ?? 0) > 8192) {
       throw const CoreException.invalidRequest('Invalid Drive page.');
@@ -283,7 +312,7 @@ final class GoogleDriveLocation implements LibrarySaveLocation {
     }
     return LocationPage([
       for (final file in (result['files'] as List? ?? []).cast<Map>())
-        if (_supported(file.cast<String, dynamic>()))
+        if (includeUnsupported || _supported(file.cast<String, dynamic>()))
           _entry(file.cast<String, dynamic>()),
     ], nextCursor: result['nextPageToken'] as String?);
   }

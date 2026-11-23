@@ -236,6 +236,39 @@ void main() {
   );
 
   test(
+    'catalog save choices include folders and disambiguate equal display labels',
+    () async {
+      final target = Directory('${directory.path}/destinations')..createSync();
+      for (final (id, folder) in [
+        ('first', 'Personal'),
+        ('second', 'Shared'),
+        ('third', 'Shared'),
+      ]) {
+        final account = Directory('${target.path}/$id')..createSync();
+        Directory('${account.path}/$folder').createSync();
+        await core.folders.add(
+          LibraryConnection(
+            id,
+            'My books',
+            'folder',
+            {'kind': 'path', 'grant': account.path},
+            directory: folder,
+            directoryLabel: folder,
+          ),
+        );
+      }
+      final options = await bridge.catalogSaveOptions();
+      expect(options.locations, [
+        (id: 'first', label: 'My books — Personal'),
+        (id: 'second', label: 'My books — Shared (1)'),
+        (id: 'third', label: 'My books — Shared (2)'),
+      ]);
+      await bridge.selectCatalogSaveLocation('third');
+      expect((await bridge.catalogSaveOptions()).selected, 'third');
+    },
+  );
+
+  test(
     'an incomplete source scan preserves prior metadata and other sources',
     () async {
       final broken = Directory('${directory.path}/broken')..createSync();
