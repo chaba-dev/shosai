@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show SemanticsAction, Tristate;
+import 'dart:ui' show SemanticsAction, Tristate, instantiateImageCodec;
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +51,161 @@ void main() {
     expectOnlyKnownDefects(await findRenderDefects(tester), const []);
     expect(tester.takeException(), isNull);
   }
+
+  testWidgets('every registered category artwork is bundled and decodable', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final provenance =
+          jsonDecode(
+                await rootBundle.loadString(
+                  'assets/catalog/categories/sources.json',
+                ),
+              )
+              as Map<String, dynamic>;
+      final categories = provenance['categories'] as List<dynamic>;
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      expect(
+        manifest.listAssets().where(
+          (path) =>
+              path.startsWith('assets/catalog/categories/') &&
+              path.endsWith('.png'),
+        ),
+        unorderedEquals(
+          categories.map(
+            (dynamic row) => 'assets/catalog/categories/${row['image']}',
+          ),
+        ),
+      );
+      for (final dynamic row in categories) {
+        final data = await rootBundle.load(
+          'assets/catalog/categories/${row['image']}',
+        );
+        final bytes = data.buffer.asUint8List(
+          data.offsetInBytes,
+          data.lengthInBytes,
+        );
+        expect(sha256.convert(bytes).toString(), row['sha256']);
+        final codec = await instantiateImageCodec(bytes);
+        final frame = await codec.getNextFrame();
+        expect(frame.image.width, greaterThan(1));
+        expect(frame.image.height, greaterThan(1));
+        frame.image.dispose();
+        codec.dispose();
+      }
+    });
+  });
+
+  testWidgets('book covers use the primary, then mirror, then text fallback', (
+    tester,
+  ) async {
+    final primaryPng = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAABQAAAAeAQMAAAAW3KwoAAAAA1BMVEVNXob/23WGAAAADElEQVQI12NgGBgAAAB4AAHa7aJXAAAAAElFTkSuQmCC',
+    );
+    final mirrorPng = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAoAAAAPAQMAAADnMcxNAAAAA1BMVEVFfWV2YuCdAAAADElEQVQI12NgIAEAAAAtAAEU9N/ZAAAAAElFTkSuQmCC',
+    );
+    var primaryStatus = 200;
+    var mirrorStatus = 200;
+    var mirrorFinished = false;
+    var id = 1342;
+    final server = (await tester.runAsync(() async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        final path = request.uri.path;
+        final primary =
+            path == '/www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg';
+        final mirror =
+            path ==
+            '/gutenberg.pglaf.org/cache/epub/$id/pg$id.cover.medium.jpg';
+        request.response.statusCode =
+            !(request.headers.value('User-Agent')?.contains(catalogUserAgent) ??
+                false)
+            ? 403
+            : primary
+            ? primaryStatus
+            : mirror
+            ? mirrorStatus
+            : 404;
+        if (request.response.statusCode == 200) {
+          request.response.headers.contentType = ContentType('image', 'png');
+          request.response.add(primary ? primaryPng : mirrorPng);
+        }
+        await request.response.close();
+        if (mirror) mirrorFinished = true;
+      });
+      return server;
+    }))!;
+    final client = _CoverHttpClient(server.port);
+    debugNetworkImageHttpClientProvider = () => client;
+    try {
+      for (final scenario in [
+        (primary: 200, mirror: 200, width: 20),
+        (primary: 503, mirror: 200, width: 10),
+        (primary: 503, mirror: 503, width: null),
+      ]) {
+        primaryStatus = scenario.primary;
+        mirrorStatus = scenario.mirror;
+        mirrorFinished = false;
+        await tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: ShellBrowsePage(
+                layout: ShellLayout.phone,
+                model: BrowseModel(
+                  criteria: (
+                    query: 'Cover probe',
+                    filter: BrowseFilter.freeBooks,
+                    category: null,
+                    language: null,
+                    source: null,
+                    author: null,
+                  ),
+                  books: [
+                    (
+                      id: 'gutenberg:$id',
+                      title: 'Cover probe',
+                      authors: const ['Author'],
+                      sources: const ['Project Gutenberg'],
+                      coverUrl:
+                          'https://www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg',
+                    ),
+                  ],
+                ),
+                local: const ShellSearchModel(),
+                dispatch: (_) {},
+                onChosen: (_) {},
+              ),
+            ),
+          ),
+        );
+        if (scenario.width case final width?) {
+          await until(
+            tester,
+            () => tester
+                .widgetList<RawImage>(find.byType(RawImage))
+                .any((image) => image.image?.width == width),
+          );
+          expect(find.byType(ShellGeneratedCover), findsNothing);
+        } else {
+          await until(tester, () => mirrorFinished);
+          expect(find.byType(ShellGeneratedCover), findsOneWidget);
+          expect(
+            tester
+                .widgetList<RawImage>(find.byType(RawImage))
+                .where((image) => image.image != null),
+            isEmpty,
+          );
+        }
+        await tester.pumpWidget(const SizedBox());
+        id++;
+      }
+    } finally {
+      debugNetworkImageHttpClientProvider = null;
+      client.close(force: true);
+      await tester.runAsync(() => server.close(force: true));
+    }
+  });
 
   testWidgets('long published category labels fit and remain actionable', (
     tester,
@@ -1268,4 +1425,29 @@ class _AcquiringBridge extends CatalogHarnessBridge {
     progress?.call(4096, 8192);
     return pending.future;
   }
+}
+
+class _RealCoverHttp extends HttpOverrides {}
+
+class _CoverHttpClient implements HttpClient {
+  _CoverHttpClient(this.port);
+  final int port;
+  final HttpClient client = _RealCoverHttp().createHttpClient(null)
+    ..autoUncompress = false;
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) => client.getUrl(
+    Uri(
+      scheme: 'http',
+      host: '127.0.0.1',
+      port: port,
+      path: '/${url.host}${url.path}',
+    ),
+  );
+
+  @override
+  void close({bool force = false}) => client.close(force: force);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

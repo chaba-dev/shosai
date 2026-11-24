@@ -579,8 +579,8 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
   );
 }
 
-/// Category artwork uses the existing generated-cover grounds, not new chrome
-/// colours. Its covers are actual members of the installed category.
+/// Precomposed member-cover artwork is bundled for the published categories.
+/// New categories retain member previews until their artwork is generated.
 class _CatalogCategoryCard extends StatelessWidget {
   const _CatalogCategoryCard({
     required this.category,
@@ -613,19 +613,34 @@ class _CatalogCategoryCard extends StatelessWidget {
               final width = constraints.maxWidth;
               return Stack(
                 children: [
-                  for (var i = 0; i < books.length; i++)
-                    Positioned(
-                      left: width * (i == 0 ? .68 : .80),
-                      bottom: ShosaiTokens.space3,
-                      width: width * (i == 0 ? .24 : .17),
-                      child: Transform.rotate(
-                        angle: i == 0 ? -.20 : .18,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(boxShadow: palette.raised),
-                          child: _CatalogCover(book: books[i]),
-                        ),
+                  Positioned.fill(
+                    top: phone ? ShosaiTokens.space4 * scale : 0,
+                    child: Image.asset(
+                      'assets/catalog/categories/${category.id.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '-').toLowerCase()}.png',
+                      fit: BoxFit.cover,
+                      alignment: Alignment.bottomRight,
+                      excludeFromSemantics: true,
+                      errorBuilder: (_, _, _) => Stack(
+                        children: [
+                          for (var i = 0; i < books.length; i++)
+                            Positioned(
+                              left: width * (i == 0 ? .68 : .80),
+                              bottom: ShosaiTokens.space3,
+                              width: width * (i == 0 ? .24 : .17),
+                              child: Transform.rotate(
+                                angle: i == 0 ? -.20 : .18,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    boxShadow: palette.raised,
+                                  ),
+                                  child: _CatalogCover(book: books[i]),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
+                  ),
                   Padding(
                     padding: const EdgeInsets.all(ShosaiTokens.space3),
                     child: SizedBox(
@@ -700,19 +715,30 @@ class _CatalogCover extends StatelessWidget {
       },
     );
     final url = Uri.tryParse(book.coverUrl ?? '');
+    Widget remote(Uri uri, Widget onFailure) => Image.network(
+      uri.toString(),
+      headers: const {'User-Agent': catalogUserAgent},
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => onFailure,
+      loadingBuilder: (_, child, loading) => loading == null ? child : fallback,
+    );
+    final mirror =
+        url != null &&
+            (url.host == 'www.gutenberg.org' || url.host == 'gutenberg.org') &&
+            RegExp(
+              r'^/cache/epub/[0-9]+/pg[0-9]+\.cover\.(small|medium)\.jpg$',
+            ).hasMatch(url.path)
+        ? Uri.https('gutenberg.pglaf.org', url.path)
+        : null;
     return ExcludeSemantics(
       child: AspectRatio(
         aspectRatio: 2 / 3,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(3),
           child: url?.scheme == 'https'
-              ? Image.network(
-                  url.toString(),
-                  headers: const {'User-Agent': catalogUserAgent},
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => fallback,
-                  loadingBuilder: (_, child, loading) =>
-                      loading == null ? child : fallback,
+              ? remote(
+                  url!,
+                  mirror == null ? fallback : remote(mirror, fallback),
                 )
               : fallback,
         ),
