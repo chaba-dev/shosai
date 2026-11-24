@@ -2,8 +2,8 @@
 """Compose the Browse artwork from actual members of an installed catalog.
 
 Run through .agents/dev with a published catalog SQLite file and an owned cache
-directory. Only two selected covers per category are fetched, never the entire
-book collection. ImageMagick is supplied by the repository's Nix environment.
+directory. Inspect member candidates until two suitable jackets are found per
+category. ImageMagick is supplied by the repository's Nix environment.
 """
 
 import argparse
@@ -51,7 +51,7 @@ def selected_books(catalog):
             preferred = [f"gutenberg:{id}" for id in PREFERRED.get(category["label"], [])]
             candidates.sort(key=lambda row: (
                 preferred.index(row["id"]) if row["id"] in preferred else len(preferred),
-                row["id"],
+                int(row["id"].split(":")[1]),
             ))
             if len(candidates) < 2:
                 raise ValueError(f"Two Gutenberg member covers required: {category['id']}")
@@ -89,7 +89,7 @@ def fetch_cover(book, cache):
     id = book["gutenbergId"]
     cover_url = f"{MIRROR}/{id}/pg{id}.cover.medium.jpg"
     rdf_url = f"{MIRROR}/{id}/pg{id}.rdf"
-    rdf = fetch(rdf_url, cache / f"{id}.rdf", 512 * 1024)
+    rdf = fetch(rdf_url, cache / f"{id}.rdf", 1024 * 1024)
     metadata = ET.fromstring(rdf)
     ebook = metadata.find("{http://www.gutenberg.org/2009/pgterms/}ebook")
     if ebook is None or ebook.attrib.get("{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about") != f"ebooks/{id}":
@@ -101,6 +101,28 @@ def fetch_cover(book, cache):
     cover = fetch(cover_url, cache / f"{id}.jpg", 1024 * 1024)
     if not cover.startswith(b"\xff\xd8") or not cover.endswith(b"\xff\xd9"):
         raise ValueError(f"Not a complete JPEG cover: {cover_url}")
+    # Gutenberg's automatic jackets have large areas of near-primary neon
+    # colours. They are valid thumbnails, but not the illustrated book jackets
+    # in the chosen Browse design. Keep looking among actual category members.
+    sample = subprocess.run([
+        "magick", str(cache / f"{id}.jpg"), "-format", "%w %h\n",
+        "-write", "info:-", "-resize", "40x60!",
+        "-depth", "8", "rgb:-",
+    ], check=True, capture_output=True).stdout
+    dimensions, pixels = sample.split(b"\n", 1)
+    width, height = map(int, dimensions.split())
+    rgb = list(zip(pixels[::3], pixels[1::3], pixels[2::3]))
+    neon = sum(max(pixel) >= 160 and min(pixel) <= 80 and max(pixel) - min(pixel) >= 140
+               for pixel in rgb) / len(rgb)
+    white_header = sum(min(pixel) > 225 for pixel in rgb[:40 * 15]) / (40 * 15)
+    coloured_rule = sum(max(pixel) - min(pixel) > 30 for pixel in rgb[:40]) / 40
+    blank = sum(min(pixel) > 200 and max(pixel) - min(pixel) < 60
+                for pixel in rgb) / len(rgb)
+    preferred = any(id in ids for ids in PREFERRED.values())
+    if not preferred and (neon > .20 or (white_header > .65 and coloured_rule > .70)
+                          or not 1.2 <= height / width <= 2.2 or blank > .60):
+        print(f"Skipped automatic jacket, banner or blank title page: {book['bookId']}", flush=True)
+        return None
     result = {**book, "sourcePage": f"https://www.gutenberg.org/ebooks/{id}",
               "downloadUrl": cover_url, "coverSha256": hashlib.sha256(cover).hexdigest(),
               "rdfUrl": rdf_url, "rdfSha256": hashlib.sha256(rdf).hexdigest(),
@@ -115,8 +137,8 @@ def compose(covers, destination):
     # and crop at the lower/right card edge, as in the chosen design.
     command = ["magick", "-limit", "thread", "1", "-size", "480x272", "canvas:none"]
     for source, width, height, angle, x, y in (
-        (covers[0], 110, 165, -12, 310, 118),
-        (covers[1], 120, 180, 12, 358, 104),
+        (covers[0], 128, 192, -12, 242, 96),
+        (covers[1], 136, 204, 12, 328, 60),
     ):
         command += ["(", str(source), "-resize", f"{width}x{height}^",
                     "-gravity", "center", "-extent", f"{width}x{height}",
@@ -145,15 +167,15 @@ def main():
         while True:
             pending = {}
             for category in categories:
-                usable = 0
+                usable = set()
                 for book in category["covers"]:
                     id = book["bookId"]
                     if id not in fetched:
                         pending[id] = book
                         break
                     if fetched[id] is not None:
-                        usable += 1
-                    if usable == 2:
+                        usable.add(fetched[id]["coverSha256"])
+                    if len(usable) == 2:
                         break
                 else:
                     raise ValueError(f"Two public-domain member covers required: {category['id']}")
@@ -163,8 +185,14 @@ def main():
                 lambda book: fetch_cover(book, args.cache), pending.values(),
             )))
     for category in categories:
-        category["covers"] = [fetched[book["bookId"]] for book in category["covers"]
-                              if fetched.get(book["bookId"]) is not None][:2]
+        selected = {}
+        for book in category["covers"]:
+            cover = fetched.get(book["bookId"])
+            if cover is not None:
+                selected.setdefault(cover["coverSha256"], cover)
+            if len(selected) == 2:
+                break
+        category["covers"] = list(selected.values())
         destination = args.output / category["image"]
         compose([args.cache / f"{book['gutenbergId']}.jpg" for book in category["covers"]], destination)
         category["sha256"] = hashlib.sha256(destination.read_bytes()).hexdigest()

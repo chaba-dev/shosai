@@ -9,8 +9,13 @@ New categories without a bundled image retain their live member-cover previews.
 the original catalog cover URL, the mirror download URL, the upstream RDF
 rights statement and the source/output SHA-256 hashes. Familiar covers from the
 chosen mock are preferred only when the books belong to that actual category.
-The remaining categories use catalog member order. Some source covers are
-Gutenberg's patterned designs; those are retained rather than inventing artwork.
+For other categories, candidates are checked in numeric Gutenberg-ID order.
+The generator rejects automatic neon/pastel jackets, non-portrait internal
+banners and mostly blank title pages, and skips identical cover files within
+each pair rather than repeating one series jacket. These image heuristics are
+a shortlist, not a design review: inspect every selected jacket and rendered
+tile after regeneration. The explicit mock selections have already been
+visually curated.
 
 The generator checks each selected book's RDF identity and requires the exact
 source statement **Public domain in the USA.** It skips copyrighted or unstated
@@ -30,7 +35,8 @@ Regenerate from an installed, verified catalog, using an owned download cache:
 
 The Nix-provided ImageMagick compositor preserves the actual cover pixels,
 rotates and overlaps two covers, adds shadows and crops them at the card edge.
-It does not redraw book artwork or lettering. Downloads are bounded to two
+It does not redraw book artwork or lettering. It checks candidates until two
+suitable members are found for each category; downloads are bounded to two
 concurrent requests, cached and identified with Shōsai's User-Agent.
 
 Ordinary book covers remain on-demand images, not 78,518 bundled thumbnails:

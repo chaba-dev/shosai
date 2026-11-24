@@ -207,6 +207,53 @@ void main() {
     }
   });
 
+  testWidgets(
+    'featured artwork keeps catalog identity and full accessible names',
+    (tester) async {
+      const HarnessView(size: Size(360, 932)).apply(tester);
+      final semantics = tester.ensureSemantics();
+      BrowseMessage? intent;
+      await tester.pumpWidget(
+        productionShell(
+          home: Scaffold(
+            body: ShellBrowsePage(
+              layout: ShellLayout.phone,
+              model: const BrowseModel(
+                categories: [
+                  (id: 'other', label: 'Another category', books: 9),
+                  (
+                    id: 'gutenberg:Crime, Thrillers and Mystery',
+                    label: 'Crime, Thrillers and Mystery',
+                    books: 23,
+                  ),
+                ],
+              ),
+              local: const ShellSearchModel(),
+              dispatch: (message) => intent = message,
+              onChosen: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.bySemanticsLabel('Crime, Thrillers and Mystery, 23 books'),
+        findsOneWidget,
+      );
+      expect(find.text('Classics of\nLiterature'), findsNothing);
+      expect(
+        tester.getTopLeft(find.text('Crime &\nMystery')).dx,
+        lessThan(tester.getTopLeft(find.text('Another category')).dx),
+      );
+      await tester.tap(find.text('Crime &\nMystery'));
+      expect(
+        (intent as BrowseChanged).criteria.category,
+        'gutenberg:Crime, Thrillers and Mystery',
+      );
+      semantics.dispose();
+    },
+  );
+
   testWidgets('long published category labels fit and remain actionable', (
     tester,
   ) async {

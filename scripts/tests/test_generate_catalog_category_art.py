@@ -29,7 +29,7 @@ class CatalogCategoryArtTest(unittest.TestCase):
                         display_order INTEGER, cover_url TEXT);
                     INSERT INTO categories VALUES ('gutenberg:Test/Category', 'Test category');
                 """)
-                for id in (1, 2, 3):
+                for id in (1, 2, 3, 4, 5, 6, 7, 8):
                     book = f"gutenberg:{id}"
                     db.execute("INSERT INTO books VALUES (?,?)", (book, f"Book {id}"))
                     db.execute("INSERT INTO book_categories VALUES (?,?)",
@@ -44,8 +44,29 @@ class CatalogCategoryArtTest(unittest.TestCase):
                           <pg:ebook rdf:about="ebooks/{id}"><dct:rights>{rights}</dct:rights></pg:ebook>
                         </rdf:RDF>
                     """, encoding="utf-8")
-                    subprocess.run(["magick", "-size", "12x18", f"xc:rgb({id*60},40,80)",
-                                    str(cache / f"{id}.jpg")], check=True)
+                    if id in (2, 3):
+                        # Both vivid and pastel automatic jackets have a white
+                        # title banner and a coloured rule above their pattern.
+                        colour = "#00cc00" if id == 2 else "#ffccff"
+                        subprocess.run([
+                            "magick", "-size", "80x120", f"xc:{colour}",
+                            "-fill", "white", "-draw", "rectangle 0,3 79,38",
+                            str(cache / f"{id}.jpg"),
+                        ], check=True)
+                    elif id in (4, 5):
+                        # A wide internal banner or an almost empty title page
+                        # must not be stretched into a pretend book jacket.
+                        subprocess.run([
+                            "magick", "-size", "80x16" if id == 4 else "80x120",
+                            "xc:white", "-fill", "black", "-draw", "rectangle 25,45 55,50",
+                            str(cache / f"{id}.jpg"),
+                        ], check=True)
+                    else:
+                        # Two volumes may reuse identical jacket pixels; the
+                        # collage must continue to a different member cover.
+                        colour_id = 6 if id == 7 else id
+                        subprocess.run(["magick", "-size", "12x18", f"xc:rgb({colour_id*20},40,80)",
+                                        str(cache / f"{id}.jpg")], check=True)
             output = root / "art"
             result = subprocess.run([sys.executable, str(SCRIPT), str(catalog), str(cache),
                                      "--output", str(output)], capture_output=True, text=True)
@@ -54,7 +75,7 @@ class CatalogCategoryArtTest(unittest.TestCase):
             category, = manifest["categories"]
             self.assertEqual(category["id"], "gutenberg:Test/Category")
             self.assertEqual([book["bookId"] for book in category["covers"]],
-                             ["gutenberg:2", "gutenberg:3"])
+                             ["gutenberg:6", "gutenberg:8"])
             image = output / "gutenberg-test-category.png"
             self.assertTrue(image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
             self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(), category["sha256"])
@@ -64,8 +85,8 @@ class CatalogCategoryArtTest(unittest.TestCase):
                     (cache / f"{book['gutenbergId']}.jpg").read_bytes()).hexdigest())
 
             # A cache or source with the wrong book identity must not produce art.
-            rdf = cache / "2.rdf"
-            rdf.write_text(rdf.read_text().replace('ebooks/2"', 'ebooks/99"'))
+            rdf = cache / "6.rdf"
+            rdf.write_text(rdf.read_text().replace('ebooks/6"', 'ebooks/99"'))
             invalid = root / "invalid"
             result = subprocess.run([sys.executable, str(SCRIPT), str(catalog), str(cache),
                                      "--output", str(invalid)], capture_output=True, text=True)

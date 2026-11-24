@@ -351,11 +351,18 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                   );
                   final width =
                       (constraints.maxWidth - gap * (columns - 1)) / columns;
+                  final categories = [
+                    for (final id in _catalogFeatured.keys)
+                      for (final category in model.categories)
+                        if (category.id == id) category,
+                    for (final category in model.categories)
+                      if (!_catalogFeatured.containsKey(category.id)) category,
+                  ];
                   return Wrap(
                     spacing: gap,
                     runSpacing: gap,
                     children: [
-                      for (final category in model.categories)
+                      for (final category in categories)
                         SizedBox(
                           key: ValueKey('catalog-category-${category.id}'),
                           width: width,
@@ -581,6 +588,18 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
 
 /// Precomposed member-cover artwork is bundled for the published categories.
 /// New categories retain member previews until their artwork is generated.
+/// Only categories present in the installed catalog are featured.
+const _catalogFeatured = {
+  'gutenberg:Classics of Literature': 'Classics of\nLiterature',
+  'gutenberg:Science-Fiction & Fantasy': 'Science\nFiction &\nFantasy',
+  'gutenberg:Crime, Thrillers and Mystery': 'Crime &\nMystery',
+  'gutenberg:Children & Young Adult Reading': 'Children &\nYoung Adult',
+  'gutenberg:Philosophy & Ethics': 'Philosophy &\nEthics',
+  'gutenberg:Poetry': 'Poetry',
+  'gutenberg:Romance': 'Romance',
+  'gutenberg:Adventure': 'Adventure',
+};
+
 class _CatalogCategoryCard extends StatelessWidget {
   const _CatalogCategoryCard({
     required this.category,
@@ -598,35 +617,59 @@ class _CatalogCategoryCard extends StatelessWidget {
     final palette = ShellPalette.of(context);
     final count = AppLocalizations.of(context).catalogBookCount(category.books);
     final scale = MediaQuery.textScalerOf(context).scale(1);
+    final featured = _catalogFeatured[category.id];
     return _ShellPressable(
       onPressed: onPressed,
       semanticLabel: '${category.label}, $count',
       radius: ShosaiTokens.radiusMd,
-      color: palette.coverGround(category.id),
+      color: switch (category.id) {
+        'gutenberg:Classics of Literature' ||
+        'gutenberg:Adventure' => ShosaiTokens.colorBrandCharcoal,
+        'gutenberg:Science-Fiction & Fantasy' => ShosaiTokens.colorLightSuccess,
+        'gutenberg:Children & Young Adult Reading' =>
+          ShosaiTokens.colorLightAccent,
+        'gutenberg:Poetry' => ShosaiTokens.colorLightVermilion,
+        'gutenberg:Crime, Thrillers and Mystery' ||
+        'gutenberg:Romance' => Color.lerp(
+          ShosaiTokens.colorLightVermilion,
+          ShosaiTokens.colorBrandCharcoal,
+          .4,
+        ),
+        'gutenberg:Philosophy & Ethics' => Color.lerp(
+          ShosaiTokens.colorSwatchPurple,
+          ShosaiTokens.colorBrandCharcoal,
+          .5,
+        ),
+        _ => palette.coverGround(category.id),
+      },
       shadow: palette.raised,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(ShosaiTokens.radiusMd),
-        child: SizedBox(
-          height: 136 * scale,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: (phone ? 112 : 128) * scale),
           child: LayoutBuilder(
             builder: (_, constraints) {
               final width = constraints.maxWidth;
+              // Keep the mock's composition at its normal size, but give
+              // counts breathing room on narrower two-column phones.
+              final artInset = phone ? math.max(0.0, 192 - width) / 2 : 0.0;
+              final artWidth = width - artInset;
               return Stack(
                 children: [
                   Positioned.fill(
-                    top: phone ? ShosaiTokens.space4 * scale : 0,
+                    left: artInset,
                     child: Image.asset(
                       'assets/catalog/categories/${category.id.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '-').toLowerCase()}.png',
-                      fit: BoxFit.cover,
+                      fit: BoxFit.fitWidth,
                       alignment: Alignment.bottomRight,
                       excludeFromSemantics: true,
                       errorBuilder: (_, _, _) => Stack(
                         children: [
                           for (var i = 0; i < books.length; i++)
                             Positioned(
-                              left: width * (i == 0 ? .68 : .80),
+                              left: artWidth * (i == 0 ? .68 : .80),
                               bottom: ShosaiTokens.space3,
-                              width: width * (i == 0 ? .24 : .17),
+                              width: artWidth * (i == 0 ? .24 : .17),
                               child: Transform.rotate(
                                 angle: i == 0 ? -.20 : .18,
                                 child: DecoratedBox(
@@ -644,26 +687,23 @@ class _CatalogCategoryCard extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.all(ShosaiTokens.space3),
                     child: SizedBox(
-                      width: books.isEmpty || phone
+                      width: phone || featured == null
                           ? null
-                          : width * .68 - ShosaiTokens.space3,
+                          : width * .72 - ShosaiTokens.space3,
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Flexible(
-                            child: Text(
-                              category.label,
-                              maxLines: phone ? 2 : 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: shellEditorialStyle(
-                                phone ? 18 : 20,
-                                phone ? 26 : 28,
-                              ).copyWith(color: ShellPalette.coverInk),
-                            ),
+                          Text(
+                            featured ?? category.label,
+                            style: shellEditorialStyle(
+                              phone ? (width * 18 / 191).clamp(16, 18) : 20,
+                              phone ? 22 : 24,
+                            ).copyWith(color: ShellPalette.coverInk),
                           ),
                           const SizedBox(height: ShosaiTokens.space1),
                           SizedBox(
-                            width: books.isEmpty
+                            width: books.isEmpty || featured == null
                                 ? null
                                 : width * .64 - ShosaiTokens.space3,
                             child: Text(
@@ -674,6 +714,10 @@ class _CatalogCategoryCard extends StatelessWidget {
                               ).copyWith(color: ShellPalette.coverInk),
                             ),
                           ),
+                          // Full source labels can be much longer than the
+                          // mock's editorial headings. Reserve the illustrated
+                          // part of the canvas below their title and count.
+                          if (featured == null) SizedBox(height: width * .45),
                         ],
                       ),
                     ),
