@@ -3,6 +3,10 @@ name: Publish Shosai to Google Play
 on:
   workflow_dispatch:
     inputs:
+      auth_only:
+        description: Verify Internal authentication without building or uploading
+        type: boolean
+        default: false
       publishing_overview_clear:
         description: I checked Play Publishing overview and coordinated with other publishers
         required: true
@@ -15,10 +19,54 @@ permissions:
   contents: read
 
 jobs:
+  verify-auth:
+    if: >-
+      github.repository == 'chaba-dev/shosai' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && inputs.auth_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: PLAY_INTERNAL
+    permissions:
+      id-token: write
+    steps:
+      - name: Verify Internal can mint a publisher token
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: play
+        with:
+          workload_identity_provider: ${{ vars.SHOSAI_PLAY_PROVIDER }}
+          service_account: ${{ vars.SHOSAI_PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          access_token_lifetime: 900s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Verify Internal cannot impersonate Production
+        env:
+          FEDERATED_TOKEN: ${{ steps.play.outputs.auth_token }}
+        run: |
+          set -euo pipefail
+          : "${FEDERATED_TOKEN:?Missing federated token}"
+          umask 077
+          response=$(mktemp)
+          trap 'rm -f -- "$response"' EXIT
+          status=$(curl --silent --show-error --max-time 30 \
+            --output "$response" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $FEDERATED_TOKEN" \
+            --json '{"scope":["https://www.googleapis.com/auth/androidpublisher"],"lifetime":"900s"}' \
+            'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/shosai-play-production@shosai-512821.iam.gserviceaccount.com:generateAccessToken')
+          if [[ "$status" != 403 ]] || ! jq -e '
+            .error.status == "PERMISSION_DENIED" and
+            (.error.message | contains("iam.serviceAccounts.getAccessToken"))
+          ' "$response" >/dev/null; then
+            echo "Expected an IAM impersonation denial for Production; got HTTP $status." >&2
+            exit 1
+          fi
+          echo 'Internal token issued; Production impersonation denied.'
+
   validate:
     if: >-
       github.repository == 'chaba-dev/shosai' &&
-      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && !inputs.auth_only) ||
        (github.event_name == 'push' && github.event.created && github.actor_id == '305388421'))
     runs-on: ubuntu-24.04
     permissions:
