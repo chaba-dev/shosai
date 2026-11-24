@@ -254,10 +254,11 @@ void main() {
     },
   );
 
-  testWidgets('long published category labels fit and remain actionable', (
+  testWidgets('category cards stay equal-sized and remain actionable', (
     tester,
   ) async {
     const label = 'Research Methods/Statistics/Information Sys';
+    final semantics = tester.ensureSemantics();
     for (final width in [360.0, 1280.0]) {
       for (final scale in [1.0, 2.0]) {
         HarnessView(size: Size(width, 900), textScale: scale).apply(tester);
@@ -270,7 +271,7 @@ void main() {
                 model: const BrowseModel(
                   categories: [
                     (id: 'research', label: label, books: 1),
-                    (id: 'poetry', label: 'Poetry', books: 1234),
+                    (id: 'gutenberg:Poetry', label: 'Poetry', books: 1234),
                     (id: 'science', label: 'Science fiction', books: 19),
                     (id: 'history', label: 'History', books: 8),
                   ],
@@ -285,11 +286,18 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(ChoiceChip), findsNothing);
         final first = tester.getRect(
-          find.byKey(const ValueKey('catalog-category-research')),
+          find.byKey(const ValueKey('catalog-category-gutenberg:Poetry')),
         );
         final second = tester.getRect(
-          find.byKey(const ValueKey('catalog-category-poetry')),
+          find.byKey(const ValueKey('catalog-category-research')),
         );
+        for (final id in ['research', 'science', 'history']) {
+          final size = tester.getSize(
+            find.byKey(ValueKey('catalog-category-$id')),
+          );
+          expect(size.width, closeTo(first.width, .001));
+          expect(size.height, closeTo(first.height, .001));
+        }
         if (scale == 1 || width == 1280) {
           expect(first.top, second.top);
           expect(first.right, lessThan(second.left));
@@ -297,6 +305,7 @@ void main() {
           expect(first.left, second.left);
           expect(first.bottom, lessThan(second.top));
         }
+        expect(find.bySemanticsLabel('$label, 1 book'), findsOneWidget);
         expect(find.text('1,234 books'), findsOneWidget);
         await tester.ensureVisible(find.text(label));
         await capture(tester, 'catalog-long-category-$width-$scale');
@@ -304,6 +313,7 @@ void main() {
         expect((intent as BrowseChanged).criteria.category, 'research');
       }
     }
+    semantics.dispose();
   });
 
   for (final dark in [false, true]) {

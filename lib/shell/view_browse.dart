@@ -645,14 +645,18 @@ class _CatalogCategoryCard extends StatelessWidget {
       shadow: palette.raised,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(ShosaiTokens.radiusMd),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: (phone ? 112 : 128) * scale),
+        child: SizedBox(
+          height: (phone ? 112 : 128) * scale,
           child: LayoutBuilder(
             builder: (_, constraints) {
               final width = constraints.maxWidth;
               // Keep the mock's composition at its normal size, but give
               // counts breathing room on narrower two-column phones.
-              final artInset = phone ? math.max(0.0, 192 - width) / 2 : 0.0;
+              final artInset = featured == null
+                  ? width * .2
+                  : phone
+                  ? math.max(0.0, 192 - width) / 2
+                  : 0.0;
               final artWidth = width - artInset;
               return Stack(
                 children: [
@@ -687,7 +691,9 @@ class _CatalogCategoryCard extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.all(ShosaiTokens.space3),
                     child: SizedBox(
-                      width: phone || featured == null
+                      width: featured == null
+                          ? width * .8 - ShosaiTokens.space3
+                          : phone
                           ? null
                           : width * .72 - ShosaiTokens.space3,
                       child: Column(
@@ -696,9 +702,17 @@ class _CatalogCategoryCard extends StatelessWidget {
                         children: [
                           Text(
                             featured ?? category.label,
+                            maxLines: featured == null ? 2 : 3,
+                            overflow: featured == null
+                                ? TextOverflow.fade
+                                : TextOverflow.ellipsis,
                             style: shellEditorialStyle(
-                              phone ? (width * 18 / 191).clamp(16, 18) : 20,
-                              phone ? 22 : 24,
+                              phone
+                                  ? (width * 18 / 191).clamp(16, 18)
+                                  : featured == null
+                                  ? 18
+                                  : 20,
+                              featured == null ? 26 : (phone ? 22 : 24),
                             ).copyWith(color: ShellPalette.coverInk),
                           ),
                           const SizedBox(height: ShosaiTokens.space1),
@@ -714,10 +728,6 @@ class _CatalogCategoryCard extends StatelessWidget {
                               ).copyWith(color: ShellPalette.coverInk),
                             ),
                           ),
-                          // Full source labels can be much longer than the
-                          // mock's editorial headings. Reserve the illustrated
-                          // part of the canvas below their title and count.
-                          if (featured == null) SizedBox(height: width * .45),
                         ],
                       ),
                     ),
