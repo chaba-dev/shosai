@@ -14,15 +14,26 @@ import '../support/catalog_fixture.dart';
 // Real socket/stream fixture, with the production HTTPS URLs routed to a
 // loopback HTTP server. This does not test TLS or contact a public source.
 class _LocalClient implements HttpClient {
-  _LocalClient(this.root, this.requests) : client = HttpClient();
+  _LocalClient(
+    this.root,
+    this.requests, {
+    this.primaryFailure,
+    this.onPrimaryFailure,
+  }) : client = HttpClient();
   final Uri root;
   final List<Uri> requests;
+  final IOException? primaryFailure;
+  final void Function()? onPrimaryFailure;
   final HttpClient client;
   @override
   set connectionTimeout(Duration? value) => client.connectionTimeout = value;
   @override
-  Future<HttpClientRequest> getUrl(Uri url) {
+  Future<HttpClientRequest> getUrl(Uri url) async {
     requests.add(url);
+    if (url.host == 'www.gutenberg.org' && primaryFailure != null) {
+      onPrimaryFailure?.call();
+      throw primaryFailure!;
+    }
     return client.getUrl(root.resolve('${url.host}${url.path}'));
   }
 
@@ -44,6 +55,8 @@ void main() {
   final requests = <Uri>[];
   var responseCode = 200;
   int? primaryCode;
+  IOException? primaryFailure;
+  void Function()? onPrimaryFailure;
   String? mirrorPath;
   var compressed = false;
   Completer<void>? wait;
@@ -67,6 +80,8 @@ void main() {
     requests.clear();
     responseCode = 200;
     primaryCode = null;
+    primaryFailure = null;
+    onPrimaryFailure = null;
     mirrorPath = null;
     compressed = false;
     wait = null;
@@ -106,8 +121,12 @@ void main() {
       catalog,
       folders,
       () async => '${root.path}/download-${sequence++}',
-      client: () =>
-          _LocalClient(Uri.parse('http://127.0.0.1:${server.port}/'), requests),
+      client: () => _LocalClient(
+        Uri.parse('http://127.0.0.1:${server.port}/'),
+        requests,
+        primaryFailure: primaryFailure,
+        onPrimaryFailure: onPrimaryFailure,
+      ),
     );
   });
   tearDown(() async {
@@ -190,6 +209,57 @@ void main() {
     final saved = await add();
     expect(File(saved.book.path).readAsBytesSync(), bytes);
     expect(requests, hasLength(1));
+  });
+
+  for (final error in [
+    const HandshakeException('CERTIFICATE_VERIFY_FAILED'),
+    const TlsException('TLS trust failure'),
+  ]) {
+    test('TLS failure is terminal without publishing: $error', () async {
+      acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+      primaryFailure = error;
+      await expectLater(add(), throwsA(same(error)));
+      expect(requests, [
+        Uri.parse('https://www.gutenberg.org/ebooks/1342.epub.noimages'),
+      ]);
+      expect((await library.page()).books, isEmpty);
+      expect(
+        root.listSync().where((f) => f.path.contains('/download-')),
+        isEmpty,
+      );
+    });
+  }
+
+  test('cancellation takes precedence over a TLS failure', () async {
+    acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+    final token = CancellationToken();
+    primaryFailure = const HandshakeException('CERTIFICATE_VERIFY_FAILED');
+    onPrimaryFailure = token.cancel;
+    await expectLater(
+      add(token: token),
+      throwsA(
+        isA<CoreException>().having(
+          (e) => e.kind,
+          'kind',
+          CoreErrorKind.cancelled,
+        ),
+      ),
+    );
+    expect(requests, hasLength(1));
+    expect((await library.page()).books, isEmpty);
+  });
+
+  test('transient socket failure recovers with the matching mirror', () async {
+    acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+    primaryFailure = const SocketException('Connection reset by peer');
+    mirrorPath = '/cache/epub/1342/pg1342.epub';
+    final saved = await add();
+    expect(File(saved.book.path).readAsBytesSync(), bytes);
+    expect((await library.page()).books.single.id, saved.book.id);
+    expect(requests.map((url) => url.toString()), [
+      'https://www.gutenberg.org/ebooks/1342.epub.noimages',
+      'https://gutenberg.pglaf.org$mirrorPath',
+    ]);
   });
 
   test('both unavailable sources fail once each without publishing', () async {

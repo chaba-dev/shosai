@@ -200,6 +200,10 @@ final class CatalogDownloads {
     } on FileSystemException {
       // A save failure is not a reason to try another network source.
       rethrow;
+    } on TlsException {
+      // Trust failures are terminal, not transient source outages.
+      cancellation.throwIfCancelled();
+      rethrow;
     } on IOException {
       cancellation.throwIfCancelled();
       return false;
