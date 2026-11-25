@@ -30,6 +30,56 @@ class ShellCount extends StatelessWidget {
   }
 }
 
+/// A text link (`sh-link`; `docs/design-system.md`, Link): words that go
+/// somewhere, such as an author's books, a source's page or its donation
+/// page. Accent text with no fill or padding, underlined on hover, with the
+/// shared focus ring and a 44 px minimum target that grows with the label.
+/// Actions that change something stay a [ShadButton].
+class ShellLink extends StatelessWidget {
+  const ShellLink({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.trailing,
+    this.style,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+  final IconData? trailing;
+
+  /// Interface body 16/24 unless the surrounding line sets another role.
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ShellPalette.of(context).accent;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        minHeight: math.max(
+          ShosaiTokens.sizeTouchTarget,
+          shosaiShadButtonHeight(context),
+        ),
+      ),
+      child: ShadButton.link(
+        height: 0,
+        padding: EdgeInsets.zero,
+        foregroundColor: accent,
+        hoverForegroundColor: accent,
+        pressedForegroundColor: accent,
+        hoverTextDecoration: TextDecoration.underline,
+        onPressed: onPressed,
+        trailing: trailing == null
+            ? null
+            : Icon(trailing, size: 18, color: accent),
+        child: Flexible(
+          child: Text(label, style: style ?? shellInterfaceStyle(16, 24)),
+        ),
+      ),
+    );
+  }
+}
+
 /// One option of a [ShellSegmentedControl]: its value and its short noun.
 typedef ShellSegment<T> = ({T value, String label});
 
