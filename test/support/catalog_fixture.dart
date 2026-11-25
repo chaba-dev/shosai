@@ -11,13 +11,18 @@ import 'production_shell_harness.dart';
 
 /// Real local catalog, with enough asymmetric content to exercise paging,
 /// author selection, alternate editions, filters and offline failure.
-CatalogClient createCatalogFixture(Directory root, {int editionCount = 2}) {
+CatalogClient createCatalogFixture(
+  Directory root, {
+  int editionCount = 2,
+  String? supportUrl = 'https://www.gutenberg.org/donate/',
+}) {
   root.createSync(recursive: true);
   final db = sqlite3.open('${root.path}/upstream.sqlite3');
   try {
     db.execute(catalogSchema);
     db.execute(
-      "INSERT INTO sources VALUES ('gutenberg', 'Project Gutenberg', 'https://www.gutenberg.org', 'Catalog from Project Gutenberg', 'https://www.gutenberg.org/donate/')",
+      "INSERT INTO sources VALUES ('gutenberg', 'Project Gutenberg', 'https://www.gutenberg.org', 'Catalog from Project Gutenberg', ?)",
+      [supportUrl],
     );
     db.execute(
       "INSERT INTO authors VALUES ('austen', 'Jane Austen', 'Austen', NULL), ('soseki', '夏目漱石', '夏目', 'なつめ')",

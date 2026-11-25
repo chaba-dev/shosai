@@ -171,11 +171,10 @@ Future<({int works, int editions, int skipped})> _importRows(
 
   db.execute('BEGIN');
   try {
-    db.execute('INSERT INTO sources (id, name, website) VALUES (?, ?, ?)', [
-      _source,
-      'Project Gutenberg',
-      '$_base/',
-    ]);
+    db.execute(
+      'INSERT INTO sources (id, name, website, support_url) VALUES (?, ?, ?, ?)',
+      [_source, 'Project Gutenberg', '$_base/', '$_base/donate/'],
+    );
     Map<String, int>? indexes;
     var width = 0;
     var record = 0;

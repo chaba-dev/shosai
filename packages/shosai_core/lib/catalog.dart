@@ -30,6 +30,7 @@ const catalogTables = {
 /// source and include the upstream format/variant where needed.
 /// Within a work, display editions in ascending `display_order`; the first is
 /// the default. Show `variant_label` rather than deriving it from the ID.
+/// A source's optional `support_url` enables its donation action; null omits it.
 const catalogSchema =
     '''
 PRAGMA foreign_keys = ON;

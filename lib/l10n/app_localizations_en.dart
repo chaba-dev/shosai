@@ -1576,7 +1576,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get catalogViewSource => 'View at source';
 
   @override
-  String get catalogSupportSource => 'Support this source';
+  String catalogSupportSource(String project) {
+    return 'Support $project';
+  }
 
   @override
   String get catalogLinkFailed => 'The source could not be opened. Try again.';

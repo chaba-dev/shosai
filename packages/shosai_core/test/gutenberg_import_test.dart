@@ -61,6 +61,12 @@ void main() {
       expect(db.select('PRAGMA foreign_key_check'), isEmpty);
       expect(
         db
+            .select("SELECT support_url FROM sources WHERE id = 'gutenberg'")
+            .single['support_url'],
+        'https://www.gutenberg.org/donate/',
+      );
+      expect(
+        db
             .select(
               "SELECT id FROM books WHERE title = 'Pride and Prejudice' ORDER BY id",
             )

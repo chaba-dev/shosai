@@ -39,6 +39,14 @@ over its JSON bytes before HTTP compression. Its format version is independent
 of the SQLite schema version. This Gutenberg exporter preserves metadata as
 imported; it does not fetch thumbnails or verify EPUB availability or rights.
 
+Donation support is configured per source with the existing nullable
+`sources.support_url`. Set it to the project's donation page when it accepts
+donations; leave it null otherwise. The app shows “Support {project}” beside
+“View at source” only for a configured URL, using the source's catalog name.
+The Gutenberg importer sets `https://www.gutenberg.org/donate/`. Existing
+snapshots retain their metadata until a regenerated snapshot is published and
+downloaded; changing the importer does not publish a catalog or alter a cache.
+
 ## Store
 
 `Store.open(path)` starts one worker isolate that owns the database's only
