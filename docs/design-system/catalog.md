@@ -29,10 +29,10 @@ The fixtures cover light/dark desktop, desktop at 200% text, portrait/landscape 
 | CatalogResult | More available / loading next page | Show more appends the next page; disabled while pending; stable catalog identity opens details |
 | CatalogEditionChoice | Loading / unavailable | Inline status with Back to Search available |
 | CatalogEditionChoice | Closed / open / alternate edition | Single-choice dropdown with a checked current option; scrollable menu preserves catalog order and metadata; rights, credit and source actions track the selected edition |
-| CatalogEditionChoice | Missing metadata / link failure | Omit absent metadata; a failed platform link reports an inline error |
+| CatalogEditionChoice | Missing metadata / link failure | Omit absent metadata; a failed platform link reports an inline error; source-action labels wrap in narrow metadata columns and buttons grow above their 44 px minimum height |
 | CatalogAcquisition | Ready / saving | Beneath the cover on desktop/tablet, after edition/source details on phone; device-local destination menu; Add stays on details, disables edition/destination changes and exposes progress/Cancel |
 | CatalogAcquisition | Added / already in library | A separate Read action opens the book; a known identical content hash never creates a second file |
-| CatalogAcquisition | Cancelled / failed | Failure uses the theme's danger foreground in interface body text and a live region, above the cover-width retry action; cancellation stays neutral; a save already committed finishes its association and reports success |
+| CatalogAcquisition | Cancelled / failed | Failure uses the theme's danger foreground in interface body text and a live region, above the retry action (cover-width on tablet/desktop); cancellation stays neutral; a save already committed finishes its association and reports success |
 
 ## Coverage and remaining states
 

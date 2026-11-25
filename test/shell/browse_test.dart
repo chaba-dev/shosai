@@ -659,6 +659,72 @@ void main() {
   }
 
   for (final dark in [false, true]) {
+    for (final (width, scale) in [(600.0, 1.0), (800.0, 2.0)]) {
+      testWidgets(
+        'source actions wrap within the framed tablet (dark: $dark, width: $width, scale: $scale)',
+        (tester) async {
+          HarnessView(size: Size(width, 1000), textScale: scale).apply(tester);
+          tester.platformDispatcher.platformBrightnessTestValue = dark
+              ? Brightness.dark
+              : Brightness.light;
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
+          );
+          final details = await tester.runAsync(() => catalog.book('0'));
+          final messages = <BrowseMessage>[];
+          await tester.pumpWidget(
+            productionShell(
+              home: Scaffold(
+                body: ShellFrame(
+                  layout: ShellLayout.tablet,
+                  model: const ShellModel(place: ShellPlace.search),
+                  covers: const {},
+                  actions: ShellActions(
+                    selectPlace: (_) {},
+                    openBook: (_) {},
+                    closeBook: (_) {},
+                    addBooks: null,
+                    loadCover: (_) => false,
+                  ),
+                  child: ShellBrowsePage(
+                    layout: ShellLayout.tablet,
+                    model: BrowseModel(details: details),
+                    local: const ShellSearchModel(),
+                    dispatch: messages.add,
+                    onChosen: (_) {},
+                  ),
+                ),
+              ),
+            ),
+          );
+          for (final (name, label, url) in [
+            ('source', 'View at source', details!.editions.first.sourceUrl),
+            (
+              'support',
+              'Support this source',
+              details.editions.first.supportUrl,
+            ),
+          ]) {
+            final button = find.widgetWithText(ShadButton, label);
+            await tester.ensureVisible(button);
+            await tester.pumpAndSettle();
+            await capture(
+              tester,
+              'catalog-framed-${width.toInt()}-${dark ? 'dark' : 'light'}-$name',
+            );
+            final bounds = tester.getRect(button);
+            expect(bounds.height, greaterThanOrEqualTo(44));
+            expect(bounds.right, lessThanOrEqualTo(width));
+            await tester.tap(button);
+            expect((messages.last as BrowseLinkRequested).url, url);
+          }
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+  }
+
+  for (final dark in [false, true]) {
     testWidgets(
       'catalog failures are announced in danger, not neutral statuses (dark: $dark)',
       (tester) async {

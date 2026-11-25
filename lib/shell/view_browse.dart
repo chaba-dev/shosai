@@ -835,6 +835,12 @@ class _CatalogBookPage extends StatelessWidget {
       offset: 4,
       radius: BorderRadius.circular(ShosaiTokens.radiusSm + 4),
     );
+    final sourceButtonConstraints = BoxConstraints(
+      minHeight: math.max(
+        ShosaiTokens.sizeTouchTarget,
+        shosaiShadButtonHeight(context),
+      ),
+    );
     Widget editionLabel(CatalogEdition edition, {bool selected = false}) =>
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1065,29 +1071,29 @@ class _CatalogBookPage extends StatelessWidget {
                 const SizedBox(height: ShosaiTokens.space3),
                 Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: ShadButton.outline(
-                    height: math.max(
-                      ShosaiTokens.sizeTouchTarget,
-                      shosaiShadButtonHeight(context),
-                    ),
-                    onPressed: () => dispatch(
-                      BrowseLinkRequested(
-                        details.editions[model.edition].sourceUrl,
+                  child: ConstrainedBox(
+                    constraints: sourceButtonConstraints,
+                    child: ShadButton.outline(
+                      height: 0,
+                      onPressed: () => dispatch(
+                        BrowseLinkRequested(
+                          details.editions[model.edition].sourceUrl,
+                        ),
                       ),
+                      child: Flexible(child: Text(l10n.catalogViewSource)),
                     ),
-                    child: Text(l10n.catalogViewSource),
                   ),
                 ),
                 if (details.editions[model.edition].supportUrl case final url?)
                   Align(
                     alignment: AlignmentDirectional.centerStart,
-                    child: ShadButton.ghost(
-                      height: math.max(
-                        ShosaiTokens.sizeTouchTarget,
-                        shosaiShadButtonHeight(context),
+                    child: ConstrainedBox(
+                      constraints: sourceButtonConstraints,
+                      child: ShadButton.ghost(
+                        height: 0,
+                        onPressed: () => dispatch(BrowseLinkRequested(url)),
+                        child: Flexible(child: Text(l10n.catalogSupportSource)),
                       ),
-                      onPressed: () => dispatch(BrowseLinkRequested(url)),
-                      child: Text(l10n.catalogSupportSource),
                     ),
                   ),
                 if (model.linkFailed) _CatalogError(l10n.catalogLinkFailed),
