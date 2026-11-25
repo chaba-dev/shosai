@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-22
+## [0.1.0] - 2026-11-25
 
 ### 🚀 Features
 
@@ -139,6 +139,7 @@ All notable changes to this project will be documented in this file.
 - *(privacy)* Bundle Apple privacy declarations (#331)
 - Refresh shelf after unlocking a PDF (#334)
 - *(a11y)* Name protected-book dialog controls (#343)
+- *(catalog)* Preserve RDF-listed Gutenberg EPUB variants (#346)
 
 ### 🚜 Refactor
 
