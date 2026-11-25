@@ -187,6 +187,7 @@ All notable changes to this project will be documented in this file.
 - *(android)* Automate Play publishing on release merges (#339)
 - Use client-id for GitHub App tokens (#344)
 - *(website)* Remove migrated Hugo site from application repository (#345)
+- *(android)* Verify Play federation without uploading (#348)
 
 ### 🛡️ Security
 
