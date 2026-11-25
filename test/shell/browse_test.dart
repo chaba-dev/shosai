@@ -506,11 +506,20 @@ void main() {
     );
   }
 
-  for (final dark in [false, true]) {
+  for (final (dark, layout, width, scale) in [
+    for (final dark in [false, true]) ...[
+      (dark, ShellLayout.phone, 390.0, 1.0),
+      (dark, ShellLayout.tablet, 800.0, 1.0),
+      (dark, ShellLayout.desktop, 1280.0, 1.0),
+      (dark, ShellLayout.desktop, 1280.0, 2.0),
+    ],
+  ]) {
     testWidgets(
-      'Add stays in details; only Read opens an identical existing book (dark: $dark)',
+      'Add stays in details; only Read opens an identical existing book (dark: $dark, layout: $layout, scale: $scale)',
       (tester) async {
-        const HarnessView(size: Size(390, 844)).apply(tester);
+        HarnessView(size: Size(width, 900), textScale: scale).apply(tester);
+        final name =
+            '${layout.name}-${dark ? 'dark' : 'light'}${scale == 1 ? '' : '-large'}';
         tester.platformDispatcher.platformBrightnessTestValue = dark
             ? Brightness.dark
             : Brightness.light;
@@ -531,7 +540,7 @@ void main() {
               body: ListenableBuilder(
                 listenable: controller,
                 builder: (_, _) => ShellBrowsePage(
-                  layout: ShellLayout.phone,
+                  layout: layout,
                   model: controller.model,
                   local: controller.local.model,
                   dispatch: controller.dispatch,
@@ -548,15 +557,24 @@ void main() {
               controller.model.details != null &&
               controller.model.saveOptions != null,
         );
+        final cover = find.byType(ShellGeneratedCover);
+        final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+        final saveTo = tester.getRect(find.text('Save to'));
+        if (layout == ShellLayout.phone) {
+          expect(saveTo.top, greaterThan(tester.getRect(picker).bottom));
+        } else {
+          expect(saveTo.top, greaterThan(tester.getRect(cover).bottom));
+          expect(saveTo.left, closeTo(tester.getRect(cover).left, 0.1));
+          expect(
+            tester.getRect(find.text('View at source')).left,
+            greaterThan(tester.getRect(cover).right),
+          );
+        }
         await tester.ensureVisible(find.text('Add to library'));
         await tester.pumpAndSettle();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-ready',
-        );
+        await capture(tester, 'catalog-acquire-$name-ready');
         await tester.tap(find.text('Add to library'));
         await until(tester, () => controller.model.acquisition.busy);
-        final picker = find.byKey(const ValueKey('catalog-edition-picker'));
         await tester.ensureVisible(picker);
         await tester.pumpAndSettle();
         expect(tester.getSemantics(picker).flagsCollection.isButton, true);
@@ -568,16 +586,10 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(PopupMenuItem<int>), findsNothing);
         expect(controller.model.edition, 0);
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-edition-disabled',
-        );
+        await capture(tester, 'catalog-acquire-$name-edition-disabled');
         await tester.ensureVisible(find.text('Cancel'));
         await tester.pump();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-progress',
-        );
+        await capture(tester, 'catalog-acquire-$name-progress');
         expect(opened, isNull);
         // Cancellation after publication must still report the committed book,
         // rather than pretend that a committed save was undone.
@@ -594,10 +606,7 @@ void main() {
         expect(changes, 1);
         await tester.ensureVisible(find.text('Read'));
         await tester.pumpAndSettle();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-existing',
-        );
+        await capture(tester, 'catalog-acquire-$name-existing');
         await tester.tap(find.text('Read'));
         await tester.pump();
         expect(opened?.bookId, harnessLibraryBooks().first.bookId);
@@ -617,10 +626,7 @@ void main() {
         expect(controller.model.acquisition.locationChanged, false);
         await tester.ensureVisible(find.text('Add to library'));
         await tester.pumpAndSettle();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-failed',
-        );
+        await capture(tester, 'catalog-acquire-$name-failed');
         // An old completion cannot replace the new book's acquisition state.
         bridge.pending = Completer<CatalogAddedBook>();
         controller.dispatch(const BrowseAddRequested());

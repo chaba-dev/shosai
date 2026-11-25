@@ -1087,9 +1087,10 @@ class _CatalogBookPage extends StatelessWidget {
                   ),
                 if (model.linkFailed) Text(l10n.catalogLinkFailed),
               ],
-              const SizedBox(height: ShosaiTokens.space5),
-              if (details.editions.isNotEmpty)
+              if (phone && details.editions.isNotEmpty) ...[
+                const SizedBox(height: ShosaiTokens.space5),
                 _CatalogAcquisitionControls(model: model, dispatch: dispatch),
+              ],
             ],
           );
     return PopScope(
@@ -1138,7 +1139,19 @@ class _CatalogBookPage extends StatelessWidget {
                     children: [
                       SizedBox(
                         width: 200,
-                        child: _CatalogCover(book: details.book),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _CatalogCover(book: details.book),
+                            if (details.editions.isNotEmpty) ...[
+                              const SizedBox(height: ShosaiTokens.space5),
+                              _CatalogAcquisitionControls(
+                                model: model,
+                                dispatch: dispatch,
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                       const SizedBox(width: ShosaiTokens.space6),
                       Expanded(child: metadata),
@@ -1221,10 +1234,13 @@ class _CatalogAcquisitionControls extends StatelessWidget {
           const SizedBox(height: ShosaiTokens.space3),
           Align(
             alignment: AlignmentDirectional.centerStart,
-            child: ShadButton(
-              height: height,
-              onPressed: () => dispatch(const BrowseReadRequested()),
-              child: Text(l10n.catalogRead),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: height),
+              child: ShadButton(
+                height: 0,
+                onPressed: () => dispatch(const BrowseReadRequested()),
+                child: Flexible(child: Text(l10n.catalogRead)),
+              ),
             ),
           ),
         ] else ...[
@@ -1239,10 +1255,14 @@ class _CatalogAcquisitionControls extends StatelessWidget {
             if (!model.optionsBusy)
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: ShadButton.outline(
-                  height: height,
-                  onPressed: () => dispatch(const BrowseSaveOptionsRequested()),
-                  child: Text(l10n.readerRetry),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: height),
+                  child: ShadButton.outline(
+                    height: 0,
+                    onPressed: () =>
+                        dispatch(const BrowseSaveOptionsRequested()),
+                    child: Flexible(child: Text(l10n.readerRetry)),
+                  ),
                 ),
               ),
           ] else ...[
@@ -1305,12 +1325,15 @@ class _CatalogAcquisitionControls extends StatelessWidget {
               const SizedBox(height: ShosaiTokens.space3),
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: ShadButton.outline(
-                  height: height,
-                  onPressed: state.cancelling
-                      ? null
-                      : () => dispatch(const BrowseAddCancelled()),
-                  child: Text(l10n.readerNoteCancel),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: height),
+                  child: ShadButton.outline(
+                    height: 0,
+                    onPressed: state.cancelling
+                        ? null
+                        : () => dispatch(const BrowseAddCancelled()),
+                    child: Flexible(child: Text(l10n.readerNoteCancel)),
+                  ),
                 ),
               ),
             ] else ...[
@@ -1329,11 +1352,14 @@ class _CatalogAcquisitionControls extends StatelessWidget {
               ],
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: ShadButton(
-                  height: height,
-                  enabled: !model.locationBusy && !state.locationChanged,
-                  onPressed: () => dispatch(const BrowseAddRequested()),
-                  child: Text(l10n.catalogAdd),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: height),
+                  child: ShadButton(
+                    height: 0,
+                    enabled: !model.locationBusy && !state.locationChanged,
+                    onPressed: () => dispatch(const BrowseAddRequested()),
+                    child: Flexible(child: Text(l10n.catalogAdd)),
+                  ),
                 ),
               ),
             ],
