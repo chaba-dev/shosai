@@ -137,7 +137,15 @@ final class CatalogDownloads {
             'Book downloads require HTTPS.',
           );
         }
-        final request = await client.getUrl(url);
+        final HttpClientRequest request;
+        try {
+          request = await client.getUrl(url);
+        } on HttpException {
+          // HTTPS setup includes proxy CONNECT. HttpException has no structured
+          // status; do not retry its protocol failures as source outages.
+          cancellation.throwIfCancelled();
+          throw const LocationException(LocationFailure.offline);
+        }
         request.followRedirects = false;
         request.headers.set(HttpHeaders.userAgentHeader, catalogUserAgent);
         final response = await request.close().timeout(

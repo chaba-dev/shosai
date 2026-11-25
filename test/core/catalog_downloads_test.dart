@@ -60,6 +60,7 @@ void main() {
   String? mirrorPath;
   var compressed = false;
   Completer<void>? wait;
+  Completer<void>? partialRead;
   late Completer<void> arrived;
 
   setUp(() async {
@@ -85,6 +86,7 @@ void main() {
     mirrorPath = null;
     compressed = false;
     wait = null;
+    partialRead = null;
     arrived = Completer<void>();
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
@@ -94,6 +96,19 @@ void main() {
       );
       if (!arrived.isCompleted) arrived.complete();
       await wait?.future;
+      if (partialRead != null &&
+          request.uri.path.startsWith('/www.gutenberg.org/')) {
+        final socket = await request.response.detachSocket(writeHeaders: false);
+        socket.write('HTTP/1.1 200 OK\r\nContent-Length: 65556\r\n\r\n');
+        socket.add(List.filled(65536, 44));
+        await socket.flush();
+        try {
+          await partialRead!.future.timeout(const Duration(seconds: 3));
+        } finally {
+          socket.destroy();
+        }
+        return;
+      }
       request.response.statusCode =
           request.uri.path.startsWith('/www.gutenberg.org/')
           ? primaryCode ?? responseCode
@@ -131,6 +146,7 @@ void main() {
   });
   tearDown(() async {
     if (wait?.isCompleted == false) wait!.complete();
+    if (partialRead?.isCompleted == false) partialRead!.complete();
     await server.close(force: true);
     await folders.close();
     await catalog.close();
@@ -141,6 +157,7 @@ void main() {
   Future<({Book book, bool existing})> add({
     String? location,
     CancellationToken? token,
+    void Function(int received, int? total)? progress,
   }) async {
     final option = (await folders.saveOptions()).locations
         .where((g) => g.connection.id == location)
@@ -157,6 +174,7 @@ void main() {
               directory: option.connection.directory,
             ),
       cancellation: token ?? CancellationToken(),
+      progress: progress,
     );
   }
 
@@ -211,6 +229,33 @@ void main() {
     expect(requests, hasLength(1));
   });
 
+  test('a permanent proxy CONNECT denial never tries the mirror', () async {
+    acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+    final proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => proxy.close(force: true));
+    final connects = <String>[];
+    proxy.listen((request) async {
+      expect(request.method, 'CONNECT');
+      connects.add(request.headers.value(HttpHeaders.hostHeader)!);
+      request.response.statusCode = HttpStatus.forbidden;
+      await request.response.close();
+    });
+    downloads = CatalogDownloads(
+      catalog,
+      folders,
+      () async => '${root.path}/download-proxy',
+      client: () =>
+          HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:${proxy.port}',
+    );
+    await expectLater(add(), throwsA(isA<LocationException>()));
+    expect(connects, ['www.gutenberg.org:443']);
+    expect((await library.page()).books, isEmpty);
+    expect(
+      root.listSync().where((f) => f.path.contains('/download-')),
+      isEmpty,
+    );
+  });
+
   for (final error in [
     const HandshakeException('CERTIFICATE_VERIFY_FAILED'),
     const TlsException('TLS trust failure'),
@@ -230,24 +275,32 @@ void main() {
     });
   }
 
-  test('cancellation takes precedence over a TLS failure', () async {
-    acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
-    final token = CancellationToken();
-    primaryFailure = const HandshakeException('CERTIFICATE_VERIFY_FAILED');
-    onPrimaryFailure = token.cancel;
-    await expectLater(
-      add(token: token),
-      throwsA(
-        isA<CoreException>().having(
-          (e) => e.kind,
-          'kind',
-          CoreErrorKind.cancelled,
-        ),
-      ),
+  for (final error in [
+    const HandshakeException('CERTIFICATE_VERIFY_FAILED'),
+    const HttpException('Proxy CONNECT denied'),
+  ]) {
+    test(
+      'cancellation takes precedence over connection failure: $error',
+      () async {
+        acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+        final token = CancellationToken();
+        primaryFailure = error;
+        onPrimaryFailure = token.cancel;
+        await expectLater(
+          add(token: token),
+          throwsA(
+            isA<CoreException>().having(
+              (e) => e.kind,
+              'kind',
+              CoreErrorKind.cancelled,
+            ),
+          ),
+        );
+        expect(requests, hasLength(1));
+        expect((await library.page()).books, isEmpty);
+      },
     );
-    expect(requests, hasLength(1));
-    expect((await library.page()).books, isEmpty);
-  });
+  }
 
   test('transient socket failure recovers with the matching mirror', () async {
     acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
@@ -261,6 +314,30 @@ void main() {
       'https://gutenberg.pglaf.org$mirrorPath',
     ]);
   });
+
+  test(
+    'a disconnected body is replaced by the complete mirror edition',
+    () async {
+      acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+      partialRead = Completer<void>();
+      final received = <int>[];
+      final saved = await add(
+        progress: (count, _) {
+          received.add(count);
+          if (count > 0 && !partialRead!.isCompleted) partialRead!.complete();
+        },
+      );
+      expect(received.first, greaterThan(0));
+      expect(received, contains(0));
+      expect(received.last, bytes.length);
+      expect(File(saved.book.path).readAsBytesSync(), bytes);
+      expect((await library.page()).books.single.id, saved.book.id);
+      expect(requests.map((url) => url.toString()), [
+        'https://www.gutenberg.org/ebooks/1342.epub.noimages',
+        'https://gutenberg.pglaf.org/cache/epub/1342/pg1342.epub',
+      ]);
+    },
+  );
 
   test('both unavailable sources fail once each without publishing', () async {
     acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
