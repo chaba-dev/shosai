@@ -1006,8 +1006,24 @@ class _CatalogBookPage extends StatelessWidget {
                   spacing: ShosaiTokens.space2,
                   runSpacing: ShosaiTokens.space2,
                   children: [
-                    for (final subject in details.subjects)
-                      Chip(label: Text(subject)),
+                    for (final (label, heading) in _subjectTags(
+                      details.subjects,
+                    ))
+                      Semantics(
+                        label: heading,
+                        excludeSemantics: true,
+                        child: Chip(
+                          label: Text(label),
+                          labelStyle: shellInterfaceStyle(
+                            14,
+                            20,
+                          ).copyWith(color: palette.ink),
+                          backgroundColor: palette.surface,
+                          shape: StadiumBorder(
+                            side: BorderSide(color: palette.lineStrong),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ],
@@ -1343,6 +1359,19 @@ class _CatalogBookPage extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Subject tags as the mock shows them: each Library of Congress heading by
+/// its first term ("England -- Fiction" reads "England"), once per term, in
+/// catalog order. The full heading stays the tag's accessible label.
+List<(String, String)> _subjectTags(List<String> subjects) {
+  final seen = <String>{};
+  return [
+    for (final heading in subjects)
+      if (heading.split(' -- ').first.trim() case final label
+          when label.isNotEmpty && seen.add(label))
+        (label, heading),
+  ];
 }
 
 /// The sources above a book title, in the sidebar's small-caps label style.
