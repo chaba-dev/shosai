@@ -16,10 +16,20 @@ anything. Commit the resulting snapshot as Hugo static assets in the
 [maintainer-only website repository](https://github.com/chaba-dev/shosai-website),
 not as app bundle assets. Readers can fetch the published
 [catalog revision index](https://www.readshosai.com/catalog/revisions.json).
-The [maintainer-only weekly refresh workflow documentation](https://github.com/chaba-dev/shosai-website#scheduled-refresh-prs)
-uses `dart run tool/import_gutenberg.dart DOWNLOADED_CSV_OR_CSV_GZ NEW.sqlite`
-before exporting. The importer requires `gzip` from the Nix shell for compressed
-input and never fetches pages or book files.
+The [maintainer-only weekly refresh documentation](https://github.com/chaba-dev/shosai-website#scheduled-refresh-prs)
+describes publication. Import with `dart run tool/import_gutenberg.dart
+DOWNLOADED_CSV_OR_CSV_GZ DOWNLOADED_RDF_TAR_BZ2 NEW.sqlite` before exporting;
+website automation must pin a revision supporting this three-path interface.
+A plain `.rdf` file is also accepted for the second input. The importer joins
+CSV search metadata with RDF-listed EPUB URLs, sizes and rights. It omits works
+without a listed EPUB, preserves each listed variant and prefers EPUB3 when
+available. Labels distinguish EPUB3 from the older EPUB2 variants. Missing sizes
+stay unknown; missing rights retain the instruction to check Gutenberg.
+
+The Nix shell supplies `gzip`, GNU `tar` and `bzip2`. The archive is streamed
+without extracting files to disk; neither the importer nor the app crawls book
+pages to discover variants. A malformed XML document, invalid EPUB URL or size,
+or damaged compressed input fails without leaving a partial output database.
 
 Pass `--previous CHECKED_IN_DIRECTORY` after the two paths when regenerating.
 The exporter compares counts, file paths, sizes and hashes, preserving the
@@ -37,7 +47,9 @@ exceeds 24 MiB rather than changing file boundaries to meet Pages' 25 MiB limit.
 The manifest counts editions by source and records each file's size and SHA-256
 over its JSON bytes before HTTP compression. Its format version is independent
 of the SQLite schema version. This Gutenberg exporter preserves metadata as
-imported; it does not fetch thumbnails or verify EPUB availability or rights.
+imported; it does not fetch thumbnails or probe downloads. An RDF listing records
+what Gutenberg offered at the feed date, not a guarantee of current availability
+or permission in every jurisdiction.
 
 ## Store
 
