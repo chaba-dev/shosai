@@ -7,20 +7,25 @@ import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/core/catalog_downloads.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:sqlite3/sqlite3.dart';
 
 import '../support/catalog_fixture.dart';
 
 // Real socket/stream fixture, with the production HTTPS URLs routed to a
 // loopback HTTP server. This does not test TLS or contact a public source.
 class _LocalClient implements HttpClient {
-  _LocalClient(this.root) : client = HttpClient();
+  _LocalClient(this.root, this.requests) : client = HttpClient();
   final Uri root;
+  final List<Uri> requests;
   final HttpClient client;
   @override
   set connectionTimeout(Duration? value) => client.connectionTimeout = value;
   @override
-  Future<HttpClientRequest> getUrl(Uri url) =>
-      client.getUrl(root.resolve(url.path));
+  Future<HttpClientRequest> getUrl(Uri url) {
+    requests.add(url);
+    return client.getUrl(root.resolve('${url.host}${url.path}'));
+  }
+
   @override
   void close({bool force = false}) => client.close(force: force);
   @override
@@ -36,7 +41,10 @@ void main() {
   late CatalogDownloads downloads;
   late HttpServer server;
   late List<int> bytes;
+  final requests = <Uri>[];
   var responseCode = 200;
+  int? primaryCode;
+  String? mirrorPath;
   var compressed = false;
   Completer<void>? wait;
   late Completer<void> arrived;
@@ -56,7 +64,10 @@ void main() {
     bytes = File(
       'packages/shosai_core/test/fixtures/sample.epub',
     ).readAsBytesSync();
+    requests.clear();
     responseCode = 200;
+    primaryCode = null;
+    mirrorPath = null;
     compressed = false;
     wait = null;
     arrived = Completer<void>();
@@ -68,7 +79,13 @@ void main() {
       );
       if (!arrived.isCompleted) arrived.complete();
       await wait?.future;
-      request.response.statusCode = responseCode;
+      request.response.statusCode =
+          request.uri.path.startsWith('/www.gutenberg.org/')
+          ? primaryCode ?? responseCode
+          : mirrorPath != null &&
+                request.uri.path != '/gutenberg.pglaf.org$mirrorPath'
+          ? 404
+          : responseCode;
       if (responseCode == 302) {
         request.response.headers.set(
           HttpHeaders.locationHeader,
@@ -89,7 +106,8 @@ void main() {
       catalog,
       folders,
       () async => '${root.path}/download-${sequence++}',
-      client: () => _LocalClient(Uri.parse('http://127.0.0.1:${server.port}/')),
+      client: () =>
+          _LocalClient(Uri.parse('http://127.0.0.1:${server.port}/'), requests),
     );
   });
   tearDown(() async {
@@ -132,6 +150,85 @@ void main() {
       }),
     );
     return target;
+  }
+
+  void acquisitionUrl(String url) {
+    final db = sqlite3.open('${root.path}/catalog/catalog.sqlite3');
+    try {
+      db.execute(
+        "UPDATE editions SET acquisition_url = ? WHERE source_edition_id = '0:0'",
+        [url],
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  for (final (variant, filename) in [
+    ('epub.noimages', 'pg1342.epub'),
+    ('epub.images', 'pg1342-images.epub'),
+    ('epub3.images', 'pg1342-images-3.epub'),
+  ]) {
+    test('source maintenance uses the same $variant on the mirror', () async {
+      acquisitionUrl('https://www.gutenberg.org/ebooks/1342.$variant');
+      primaryCode = 503;
+      mirrorPath = '/cache/epub/1342/$filename';
+      final saved = await add();
+      expect(saved.existing, false);
+      expect(File(saved.book.path).readAsBytesSync(), bytes);
+      expect(saved.book.lastRead, isNull);
+      expect((await library.page()).books.single.id, saved.book.id);
+      expect(requests.map((url) => url.toString()), [
+        'https://www.gutenberg.org/ebooks/1342.$variant',
+        'https://gutenberg.pglaf.org$mirrorPath',
+      ]);
+    });
+  }
+
+  test('a working original source needs no mirror', () async {
+    acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+    final saved = await add();
+    expect(File(saved.book.path).readAsBytesSync(), bytes);
+    expect(requests, hasLength(1));
+  });
+
+  test('both unavailable sources fail once each without publishing', () async {
+    acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+    responseCode = 503;
+    await expectLater(add(), throwsA(isA<LocationException>()));
+    expect(requests, hasLength(2));
+    expect((await library.page()).books, isEmpty);
+    expect(
+      root.listSync().where((f) => f.path.contains('/download-')),
+      isEmpty,
+    );
+  });
+
+  for (final status in [403, 404, 429]) {
+    test('HTTP $status is not retried through a mirror', () async {
+      acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
+      primaryCode = status;
+      await expectLater(add(), throwsA(isA<LocationException>()));
+      expect(requests, hasLength(1));
+      expect((await library.page()).books, isEmpty);
+    });
+  }
+
+  for (final url in [
+    'https://other.example/ebooks/1342.epub.noimages',
+    'https://www.gutenberg.org/ebooks/1342.epub',
+    'https://www.gutenberg.org/ebooks/1342.epub.noimages?different=edition',
+  ]) {
+    test(
+      'unknown acquisition URL is never mapped to another edition: $url',
+      () async {
+        acquisitionUrl(url);
+        responseCode = 503;
+        await expectLater(add(), throwsA(isA<LocationException>()));
+        expect(requests, hasLength(1));
+        expect((await library.page()).books, isEmpty);
+      },
+    );
   }
 
   test(
@@ -220,6 +317,7 @@ void main() {
   test(
     'invalid bytes and HTTPS downgrade never publish or admit a book',
     () async {
+      acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
       final target = await connect();
       bytes = [1, 2, 3, 4];
       await expectLater(add(location: 'folder'), throwsA(isA<CoreException>()));
@@ -485,6 +583,7 @@ void main() {
   test(
     'cancelling a stalled download cleans staging and admits nothing',
     () async {
+      acquisitionUrl('https://www.gutenberg.org/ebooks/1342.epub.noimages');
       wait = Completer<void>();
       final token = CancellationToken();
       final pending = add(token: token);
@@ -501,6 +600,7 @@ void main() {
       await arrived.future;
       token.cancel();
       await failure;
+      expect(requests, hasLength(1));
       expect((await library.page()).books, isEmpty);
       expect(
         root.listSync().where((f) => f.path.contains('/download-')),

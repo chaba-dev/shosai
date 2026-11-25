@@ -61,12 +61,43 @@ final class CatalogDownloads {
     );
     final file = File('${staging.path}/$name');
     try {
-      await _download(
-        Uri.parse(edition.acquisitionUrl),
-        file,
-        cancellation,
-        progress,
-      );
+      final url = Uri.parse(edition.acquisitionUrl);
+      // Gutenberg's website rewrites these links; its static mirrors do not.
+      // Keep the exact EPUB variant using the source's documented mapping:
+      // https://github.com/gutenbergtools/libgutenberg/blob/master/pg_archive_urls.py
+      final match =
+          sourceId == 'gutenberg' &&
+              url.scheme == 'https' &&
+              url.host == 'www.gutenberg.org' &&
+              url.port == 443 &&
+              url.userInfo.isEmpty &&
+              !url.hasQuery &&
+              !url.hasFragment
+          ? RegExp(
+              r'^/ebooks/([0-9]+)\.(epub\.noimages|epub\.images|epub3\.images)$',
+            ).firstMatch(url.path)
+          : null;
+      final suffix = switch (match?.group(2)) {
+        'epub.noimages' => '',
+        'epub.images' => '-images',
+        'epub3.images' => '-images-3',
+        _ => null,
+      };
+      final mirror = suffix == null
+          ? null
+          : Uri.https(
+              'gutenberg.pglaf.org',
+              '/cache/epub/${match!.group(1)}/pg${match.group(1)}$suffix.epub',
+            );
+      var downloaded = await _download(url, file, cancellation, progress);
+      if (!downloaded && mirror != null) {
+        cancellation.throwIfCancelled();
+        progress?.call(0, null);
+        downloaded = await _download(mirror, file, cancellation, progress);
+      }
+      if (!downloaded) {
+        throw const LocationException(LocationFailure.offline);
+      }
       cancellation.throwIfCancelled();
       return await folders.saveDownloadedBook(
         file.path,
@@ -83,7 +114,7 @@ final class CatalogDownloads {
     }
   }
 
-  Future<void> _download(
+  Future<bool> _download(
     Uri url,
     File destination,
     CancellationToken cancellation,
@@ -119,6 +150,9 @@ final class CatalogDownloads {
           }
           url = url.resolve(location);
           continue;
+        }
+        if (response.statusCode >= 500 && response.statusCode <= 599) {
+          return false;
         }
         if (response.statusCode != 200) {
           throw const LocationException(LocationFailure.offline);
@@ -160,15 +194,18 @@ final class CatalogDownloads {
             'The book download was incomplete.',
           );
         }
-        return;
+        return true;
       }
       throw const CoreException.malformed('Too many book redirects.');
+    } on FileSystemException {
+      // A save failure is not a reason to try another network source.
+      rethrow;
     } on IOException {
       cancellation.throwIfCancelled();
-      throw const LocationException(LocationFailure.offline);
+      return false;
     } on TimeoutException {
       cancellation.throwIfCancelled();
-      throw const LocationException(LocationFailure.offline);
+      return false;
     } finally {
       active = false;
       client.close(force: true);
