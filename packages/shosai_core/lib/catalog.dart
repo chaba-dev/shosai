@@ -6,7 +6,7 @@ import 'dart:convert';
 
 export 'src/catalog/catalog_client.dart';
 
-const catalogDatabaseVersion = 1;
+const catalogDatabaseVersion = 2;
 const catalogFormatVersion = 2;
 
 /// Published tables in foreign-key insertion order. Each `<table>/<part>.json`
@@ -25,12 +25,25 @@ const catalogTables = {
   'book_categories': (orderBy: 'category_id, book_id', parts: '0'),
 };
 
+/// Descriptive tables added within format 2. A manifest lists all of a
+/// table's partitions or none of them, so snapshots without them still load
+/// and readers that predate them verify but ignore the files. Imported after
+/// [catalogTables]; `book_details` partitions like editions.
+const optionalCatalogTables = {
+  'author_details': (orderBy: 'author_id', parts: '0'),
+  'book_details': (orderBy: 'book_id', parts: '0123456789abcdef'),
+};
+
 /// Apply to a fresh catalog database with no user data. The publisher supplies
 /// work IDs and explicit edition groupings. Edition IDs are scoped to their
 /// source and include the upstream format/variant where needed.
 /// Within a work, display editions in ascending `display_order`; the first is
 /// the default. Show `variant_label` rather than deriving it from the ID.
 /// A source's optional `support_url` enables its donation action; null omits it.
+/// `author_details` gives a reading-order name and life years when known;
+/// years before the common era are negative. `book_details` holds the source's
+/// summary as published and a rounded Flesch reading-ease score, which may fall
+/// outside 0–100. Neither invents a value the source does not supply.
 const catalogSchema =
     '''
 PRAGMA foreign_keys = ON;
@@ -94,6 +107,18 @@ CREATE TABLE book_categories (
   category_id TEXT NOT NULL REFERENCES categories(id),
   PRIMARY KEY (category_id, book_id)
 ) STRICT;
+CREATE TABLE author_details (
+  author_id TEXT PRIMARY KEY REFERENCES authors(id),
+  display_name TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
+  birth_year INTEGER,
+  death_year INTEGER
+) STRICT;
+CREATE TABLE book_details (
+  book_id TEXT PRIMARY KEY REFERENCES books(id),
+  summary TEXT CHECK (length(trim(summary)) > 0),
+  reading_ease INTEGER,
+  CHECK (summary IS NOT NULL OR reading_ease IS NOT NULL)
+) STRICT;
 PRAGMA user_version = $catalogDatabaseVersion;
 COMMIT;
 ''';
@@ -155,6 +180,15 @@ final class CatalogManifest {
               'Missing catalog partition: ${entry.key}/$part',
             );
           }
+        }
+      }
+      for (final entry in optionalCatalogTables.entries) {
+        final listed = entry.value.parts
+            .split('')
+            .where((part) => files.containsKey('${entry.key}/$part.json'))
+            .length;
+        if (listed != 0 && listed != entry.value.parts.length) {
+          throw FormatException('Incomplete catalog table: ${entry.key}');
         }
       }
       return CatalogManifest._(

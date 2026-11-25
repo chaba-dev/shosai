@@ -57,7 +57,10 @@ void exportCatalogJson(String input, String destination, {String? previous}) {
     final staging = Directory(p.dirname(output)).createTempSync('.catalog-');
     try {
       final files = <String, CatalogFile>{};
-      for (final MapEntry(key: table, value: layout) in catalogTables.entries) {
+      for (final MapEntry(key: table, value: layout) in {
+        ...catalogTables,
+        ...optionalCatalogTables,
+      }.entries) {
         Directory(p.join(staging.path, table)).createSync();
         final stmt = db.prepare(
           'SELECT * FROM $table ORDER BY ${layout.orderBy}',

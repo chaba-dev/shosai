@@ -1475,6 +1475,59 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get catalogEdition => '版';
+
+  @override
+  String catalogLanguageName(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'en': '英語',
+      'fr': 'フランス語',
+      'de': 'ドイツ語',
+      'fi': 'フィンランド語',
+      'nl': 'オランダ語',
+      'it': 'イタリア語',
+      'es': 'スペイン語',
+      'pt': 'ポルトガル語',
+      'la': 'ラテン語',
+      'el': 'ギリシャ語',
+      'sv': 'スウェーデン語',
+      'da': 'デンマーク語',
+      'eo': 'エスペラント',
+      'hu': 'ハンガリー語',
+      'ru': 'ロシア語',
+      'pl': 'ポーランド語',
+      'zh': '中国語',
+      'ja': '日本語',
+      'other': '$code',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String catalogReadingEase(int score) {
+    return '読みやすさ $score';
+  }
+
+  @override
+  String catalogYearBce(int year) {
+    return '紀元前$year年';
+  }
+
+  @override
+  String catalogMoreByAuthor(String author) {
+    return '$authorの他の作品';
+  }
+
+  @override
+  String catalogAllByAuthor(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return 'すべて（$countString）';
+  }
+
+  @override
   String get catalogViewSource => '提供元で確認';
 
   @override

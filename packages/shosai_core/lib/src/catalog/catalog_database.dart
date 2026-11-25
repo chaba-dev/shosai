@@ -39,11 +39,29 @@ typedef CatalogEdition = ({
   int? sizeBytes,
   String? coverUrl,
 });
+
+/// A work's author as the details page names them: the reading-order name
+/// when the catalog supplies one, life years when known, and their book count.
+typedef CatalogBookAuthor = ({
+  String id,
+  String name,
+  int? birthYear,
+  int? deathYear,
+  int books,
+});
 typedef CatalogBookDetails = ({
   CatalogBook book,
   List<CatalogEdition> editions,
   List<String> subjects,
+  List<CatalogBookAuthor> authors,
+  String? summary,
+  int? readingEase,
+
+  /// Up to [catalogMoreByAuthorLimit] other books by the first author.
+  List<CatalogBook> moreByAuthor,
 });
+
+const catalogMoreByAuthorLimit = 12;
 
 bool catalogMatches(String path, CatalogManifest candidate) {
   if (!File(path).existsSync()) return false;
@@ -91,7 +109,13 @@ void importCatalog(String stage, String manifestText) {
   try {
     db.execute(catalogSchema);
     db.execute('BEGIN');
-    for (final entry in catalogTables.entries) {
+    for (final entry in {
+      ...catalogTables,
+      // Earlier snapshots omit the descriptive tables; they then stay empty.
+      for (final optional in optionalCatalogTables.entries)
+        if (manifest.files.containsKey('${optional.key}/0.json'))
+          optional.key: optional.value,
+    }.entries) {
       final table = entry.key;
       final fields = db.select('PRAGMA table_info($table)');
       final columns = fields.map((row) => row['name'] as String).toList();
@@ -130,6 +154,9 @@ void importCatalog(String stage, String manifestText) {
       }
     }
     db.execute('CREATE INDEX catalog_editions_book ON editions(book_id)');
+    db.execute(
+      'CREATE INDEX catalog_book_authors_author ON book_authors(author_id)',
+    );
     final counts = {
       for (final row in db.select(
         'SELECT source_id, COUNT(*) AS n FROM editions GROUP BY source_id',
@@ -382,6 +409,18 @@ CatalogBookDetails? catalogBook(String path, String id) {
   return _read(path, (db) {
     final rows = db.select('SELECT id, title FROM books WHERE id=?', [id]);
     if (rows.isEmpty) return null;
+    final authors = db.select(
+      '''SELECT a.id, a.name, d.display_name, d.birth_year, d.death_year,
+      (SELECT COUNT(*) FROM book_authors x WHERE x.author_id=a.id) AS n
+      FROM book_authors ba JOIN authors a ON a.id=ba.author_id
+      LEFT JOIN author_details d ON d.author_id=a.id
+      WHERE ba.book_id=? ORDER BY ba.position''',
+      [id],
+    );
+    final described = db.select(
+      'SELECT summary, reading_ease FROM book_details WHERE book_id=?',
+      [id],
+    ).firstOrNull;
     return (
       book: _book(db, rows.single),
       editions: List<CatalogEdition>.unmodifiable(
@@ -420,6 +459,32 @@ CatalogBookDetails? catalogBook(String path, String id) {
             )
             .map((row) => row['label'] as String),
       ),
+      authors: List<CatalogBookAuthor>.unmodifiable(
+        authors.map(
+          (row) => (
+            id: row['id'] as String,
+            name: (row['display_name'] ?? row['name']) as String,
+            birthYear: row['birth_year'] as int?,
+            deathYear: row['death_year'] as int?,
+            books: row['n'] as int,
+          ),
+        ),
+      ),
+      summary: described?['summary'] as String?,
+      readingEase: described?['reading_ease'] as int?,
+      moreByAuthor: authors.isEmpty
+          ? const []
+          : List<CatalogBook>.unmodifiable(
+              db
+                  .select(
+                    '''SELECT b.id, b.title FROM book_authors ba
+              JOIN books b ON b.id=ba.book_id
+              WHERE ba.author_id=? AND ba.book_id<>?
+              ORDER BY b.title COLLATE NOCASE, b.id LIMIT ?''',
+                    [authors.first['id'], id, catalogMoreByAuthorLimit],
+                  )
+                  .map((row) => _book(db, row)),
+            ),
     );
   });
 }

@@ -557,7 +557,7 @@ void main() {
               controller.model.details != null &&
               controller.model.saveOptions != null,
         );
-        final cover = find.byType(ShellGeneratedCover);
+        final cover = find.byType(ShellGeneratedCover).first;
         final picker = find.byKey(const ValueKey('catalog-edition-picker'));
         void expectCoverWidth(String label) {
           if (layout == ShellLayout.phone) return;
@@ -1206,7 +1206,7 @@ void main() {
       await tester.tap(find.text('Pride and Prejudice').first);
       await until(
         tester,
-        () => find.text('Choose an edition').evaluate().isNotEmpty,
+        () => find.text('Edition').evaluate().isNotEmpty,
       );
       expect(
         find.text('Public domain in the USA. Check the law where you live.'),
@@ -1234,12 +1234,12 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
-      expect(find.text('Choose an edition'), findsNothing);
+      expect(find.text('Edition'), findsNothing);
       expect(tester.testTextInput.hasAnyClients, isTrue);
       await tester.tap(find.text('Pride and Prejudice').first);
       await until(
         tester,
-        () => find.text('Choose an edition').evaluate().isNotEmpty,
+        () => find.text('Edition').evaluate().isNotEmpty,
       );
       await tester.tap(find.text('Back to Search'));
       await tester.pumpAndSettle();
@@ -1500,6 +1500,9 @@ void main() {
       await until(tester, () => controller.model.saveOptions != null);
       final picker = find.byKey(const ValueKey('catalog-edition-picker'));
       await tester.ensureVisible(find.text('Add to library'));
+      // The author shelf below lets Add scroll to the top; bring the picker
+      // back so the menu opens over Add.
+      await tester.ensureVisible(picker);
       await tester.pumpAndSettle();
       await tester.tap(picker);
       await tester.pumpAndSettle();
