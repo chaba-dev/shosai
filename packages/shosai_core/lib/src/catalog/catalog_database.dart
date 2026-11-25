@@ -243,8 +243,10 @@ CatalogBook _book(Database db, Row row) => (
   authors: List.unmodifiable(
     db
         .select(
-          '''SELECT a.name FROM book_authors ba
-    JOIN authors a ON a.id=ba.author_id WHERE ba.book_id=? ORDER BY ba.position''',
+          '''SELECT COALESCE(d.display_name, a.name) AS name FROM book_authors ba
+    JOIN authors a ON a.id=ba.author_id
+    LEFT JOIN author_details d ON d.author_id=a.id
+    WHERE ba.book_id=? ORDER BY ba.position''',
           [row['id']],
         )
         .map((row) => row['name'] as String),

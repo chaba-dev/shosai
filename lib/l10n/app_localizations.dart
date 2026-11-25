@@ -2610,11 +2610,17 @@ abstract class AppLocalizations {
   /// **'Choose an edition'**
   String get catalogChooseEdition;
 
-  /// No description provided for @catalogBytes.
+  /// No description provided for @catalogKilobytes.
   ///
   /// In en, this message translates to:
-  /// **'{count} bytes'**
-  String catalogBytes(int count);
+  /// **'{count} KB'**
+  String catalogKilobytes(int count);
+
+  /// No description provided for @catalogMegabytes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} MB'**
+  String catalogMegabytes(double count);
 
   /// No description provided for @catalogEdition.
   ///

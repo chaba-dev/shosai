@@ -110,7 +110,8 @@ void main() {
       expect(previews.keys, ['fiction']);
       expect(previews['fiction']!.map((b) => b.id), ['cat', 'pride']);
       expect(previews['fiction']!.last.title, 'Pride and Prejudice');
-      expect(previews['fiction']!.last.authors, ['Austen, Jane']);
+      // Book cards show an author's display name, not the catalog heading.
+      expect(previews['fiction']!.last.authors, ['Jane Austen']);
       expect(previews['fiction']!.last.sources, ['Project Gutenberg', '青空文庫']);
       expect(await client.authors(query: 'AUSTEN'), [
         (id: 'austen', name: 'Austen, Jane', books: 1),
@@ -131,7 +132,7 @@ void main() {
       final book = (await client.book('pride'))!;
       expect(book.book.id, 'pride');
       expect(book.book.title, 'Pride and Prejudice');
-      expect(book.book.authors, ['Austen, Jane']);
+      expect(book.book.authors, ['Jane Austen']);
       expect(book.book.sources, ['Project Gutenberg', '青空文庫']);
       expect(book.book.coverUrl, isNull);
       expect(book.subjects, ['Love stories']);
@@ -149,6 +150,7 @@ void main() {
       final cat = (await client.book('cat'))!;
       expect((cat.summary, cat.readingEase), (null, -13));
       expect(cat.authors.single.name, '夏目漱石');
+      expect(cat.book.authors, ['夏目漱石']);
       expect(cat.authors.single.birthYear, isNull);
 
       expect(

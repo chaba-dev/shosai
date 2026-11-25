@@ -1564,12 +1564,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get catalogChooseEdition => 'Choose an edition';
 
   @override
-  String catalogBytes(int count) {
+  String catalogKilobytes(int count) {
     final intl.NumberFormat countNumberFormat =
         intl.NumberFormat.decimalPattern(localeName);
     final String countString = countNumberFormat.format(count);
 
-    return '$countString bytes';
+    return '$countString KB';
+  }
+
+  @override
+  String catalogMegabytes(double count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPatternDigits(
+          locale: localeName,
+          decimalDigits: 1,
+        );
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString MB';
   }
 
   @override

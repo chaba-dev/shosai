@@ -841,33 +841,36 @@ class _CatalogBookPage extends StatelessWidget {
       offset: 4,
       radius: BorderRadius.circular(ShosaiTokens.radiusSm + 4),
     );
-    Widget editionLabel(CatalogEdition edition, {bool selected = false}) =>
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${edition.sourceName} · ${edition.variant}',
-              style: shellInterfaceStyle(14, 20).copyWith(
-                color: selected
-                    ? theme.colorScheme.accentForeground
-                    : palette.ink,
-              ),
-            ),
-            Text(
-              [
-                edition.format.toUpperCase(),
-                edition.language,
-                if (edition.sizeBytes != null)
-                  l10n.catalogBytes(edition.sizeBytes!),
-              ].join(' · '),
-              style: shellInterfaceStyle(13, 20).copyWith(
-                color: selected
-                    ? theme.colorScheme.accentForeground
-                    : palette.inkMuted,
-              ),
-            ),
-          ],
-        );
+    Widget editionLabel(
+      CatalogEdition edition, {
+      bool selected = false,
+    }) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${edition.sourceName} · ${edition.variant}',
+          style: shellInterfaceStyle(14, 20).copyWith(
+            color: selected ? theme.colorScheme.accentForeground : palette.ink,
+          ),
+        ),
+        Text(
+          [
+            edition.format.toUpperCase(),
+            edition.language,
+            // Decimal units, as the platforms' file managers show them.
+            if (edition.sizeBytes case final size?)
+              size < 100000
+                  ? l10n.catalogKilobytes(math.max(1, (size / 1000).round()))
+                  : l10n.catalogMegabytes(size / 1000000),
+          ].join(' · '),
+          style: shellInterfaceStyle(13, 20).copyWith(
+            color: selected
+                ? theme.colorScheme.accentForeground
+                : palette.inkMuted,
+          ),
+        ),
+      ],
+    );
     PopupMenuItem<int> editionOption(int index, CatalogEdition edition) =>
         PopupMenuItem<int>(
           value: index,

@@ -1517,7 +1517,7 @@ void main() {
             )
             .map((node) => node.label),
         unorderedEquals([
-          'Project Gutenberg · With images\nEPUB · en · 123,456 bytes',
+          'Project Gutenberg · With images\nEPUB · en · 0.1 MB',
           'Project Gutenberg · Without images\nEPUB · en',
           'Dismiss menu',
         ]),
