@@ -98,6 +98,8 @@
           python3
           # Offline catalog import and scheduled refresh automation
           gzip
+          bzip2
+          gnutar
           curl
           git
           gh
