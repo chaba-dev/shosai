@@ -486,7 +486,12 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
             if (model.busy)
               _status(l10n.shellSearchSearching)
             else if (model.failed)
-              _status(l10n.catalogReadFailed)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: ShosaiTokens.space3,
+                ),
+                child: _CatalogError(l10n.catalogReadFailed),
+              )
             else if ((catalog &&
                     model.books.isEmpty &&
                     (!discovery || !model.installed)) ||
@@ -1085,7 +1090,7 @@ class _CatalogBookPage extends StatelessWidget {
                       child: Text(l10n.catalogSupportSource),
                     ),
                   ),
-                if (model.linkFailed) Text(l10n.catalogLinkFailed),
+                if (model.linkFailed) _CatalogError(l10n.catalogLinkFailed),
               ],
               if (phone && details.editions.isNotEmpty) ...[
                 const SizedBox(height: ShosaiTokens.space5),
@@ -1126,7 +1131,7 @@ class _CatalogBookPage extends StatelessWidget {
               ),
               const SizedBox(height: ShosaiTokens.space5),
               if (model.detailBusy) Text(l10n.shellSearchSearching),
-              if (model.detailFailed) Text(l10n.catalogReadFailed),
+              if (model.detailFailed) _CatalogError(l10n.catalogReadFailed),
               if (details != null)
                 if (phone) ...[
                   Center(
@@ -1205,6 +1210,24 @@ class _CatalogEditionMenuShape extends RoundedRectangleBorder {
   }
 }
 
+class _CatalogError extends StatelessWidget {
+  const _CatalogError(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Text(
+      message,
+      style: shellInterfaceStyle(
+        14,
+        20,
+      ).copyWith(color: ShadTheme.of(context).colorScheme.destructive),
+    ),
+  );
+}
+
 class _CatalogAcquisitionControls extends StatelessWidget {
   const _CatalogAcquisitionControls({
     required this.model,
@@ -1257,11 +1280,10 @@ class _CatalogAcquisitionControls extends StatelessWidget {
           Text(l10n.catalogSaveTo, style: shellInterfaceStyle(13, 20)),
           const SizedBox(height: ShosaiTokens.space2),
           if (options == null) ...[
-            Text(
-              model.optionsBusy
-                  ? l10n.catalogLocationsLoading
-                  : l10n.catalogLocationsFailed,
-            ),
+            if (model.optionsBusy)
+              Text(l10n.catalogLocationsLoading)
+            else
+              _CatalogError(l10n.catalogLocationsFailed),
             if (!model.optionsBusy)
               Align(
                 alignment: AlignmentDirectional.centerStart,
@@ -1348,16 +1370,17 @@ class _CatalogAcquisitionControls extends StatelessWidget {
               ),
             ] else ...[
               if (state.failed || state.cancelled) ...[
-                Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    state.cancelled
-                        ? l10n.catalogCancelled
-                        : state.locationChanged
+                if (state.cancelled)
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(l10n.catalogCancelled),
+                  )
+                else
+                  _CatalogError(
+                    state.locationChanged
                         ? l10n.catalogLocationChanged
                         : l10n.catalogAddFailed,
                   ),
-                ),
                 const SizedBox(height: ShosaiTokens.space3),
               ],
               Align(

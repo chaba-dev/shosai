@@ -658,6 +658,133 @@ void main() {
     );
   }
 
+  for (final dark in [false, true]) {
+    testWidgets(
+      'catalog failures are announced in danger, not neutral statuses (dark: $dark)',
+      (tester) async {
+        const HarnessView(size: Size(800, 900)).apply(tester);
+        tester.platformDispatcher.platformBrightnessTestValue = dark
+            ? Brightness.dark
+            : Brightness.light;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final semantics = tester.ensureSemantics();
+        final details = await tester.runAsync(() => catalog.book('0'));
+        final options = await CatalogHarnessBridge(
+          catalog,
+        ).catalogSaveOptions();
+        final book = BrowseModel(details: details, saveOptions: options);
+        for (final (name, model, message, error) in [
+          (
+            'catalog',
+            const BrowseModel(failed: true),
+            'The catalog could not be read. Leave Search and try again.',
+            true,
+          ),
+          (
+            'details',
+            const BrowseModel(detailFailed: true),
+            'The catalog could not be read. Leave Search and try again.',
+            true,
+          ),
+          (
+            'link',
+            book.copyWith(linkFailed: true),
+            'The source could not be opened. Try again.',
+            true,
+          ),
+          (
+            'locations',
+            book.copyWith(saveOptions: () => null),
+            'Save locations could not be loaded.',
+            true,
+          ),
+          (
+            'changed',
+            book.copyWith(
+              acquisition: const BrowseAcquisition(
+                failed: true,
+                locationChanged: true,
+              ),
+            ),
+            'The save location changed. Choose a save location again before adding.',
+            true,
+          ),
+          (
+            'add',
+            book.copyWith(acquisition: const BrowseAcquisition(failed: true)),
+            'The book could not be added. Check your connection and save location, then try again.',
+            true,
+          ),
+          (
+            'cancelled',
+            book.copyWith(
+              acquisition: const BrowseAcquisition(cancelled: true),
+            ),
+            'Download cancelled.',
+            false,
+          ),
+          (
+            'loading',
+            book.copyWith(saveOptions: () => null, optionsBusy: true),
+            'Loading save locations…',
+            false,
+          ),
+          (
+            'progress',
+            book.copyWith(
+              acquisition: const BrowseAcquisition(
+                busy: true,
+                received: 4096,
+                total: 8192,
+              ),
+            ),
+            'Downloading and adding…',
+            false,
+          ),
+        ]) {
+          await tester.pumpWidget(
+            productionShell(
+              home: Scaffold(
+                body: ShellBrowsePage(
+                  layout: ShellLayout.tablet,
+                  model: model,
+                  local: const ShellSearchModel(),
+                  dispatch: (_) {},
+                  onChosen: (_) {},
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final text = find.text(message);
+          expect(text, findsOneWidget, reason: name);
+          await tester.ensureVisible(text);
+          await tester.pumpAndSettle();
+          final danger = ShadTheme.of(
+            tester.element(text),
+          ).colorScheme.destructive;
+          final style = DefaultTextStyle.of(
+            tester.element(text),
+          ).style.merge(tester.widget<Text>(text).style);
+          expect(style.color, error ? danger : isNot(danger), reason: name);
+          if (error) {
+            expect(
+              tester.getSemantics(text).flagsCollection.isLiveRegion,
+              isTrue,
+              reason: name,
+            );
+          }
+          await capture(
+            tester,
+            'catalog-error-${dark ? 'dark' : 'light'}-$name',
+          );
+          await tester.pumpWidget(const SizedBox());
+        }
+        semantics.dispose();
+      },
+    );
+  }
+
   testWidgets(
     'a changed destination reloads its label and requires a fresh choice before retry',
     (tester) async {
