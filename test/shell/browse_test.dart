@@ -559,6 +559,14 @@ void main() {
         );
         final cover = find.byType(ShellGeneratedCover);
         final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+        void expectCoverWidth(String label) {
+          if (layout == ShellLayout.phone) return;
+          final button = tester.getRect(find.widgetWithText(ShadButton, label));
+          final coverRect = tester.getRect(cover);
+          expect(button.left, closeTo(coverRect.left, 0.1));
+          expect(button.width, closeTo(coverRect.width, 0.1));
+        }
+
         final saveTo = tester.getRect(find.text('Save to'));
         if (layout == ShellLayout.phone) {
           expect(saveTo.top, greaterThan(tester.getRect(picker).bottom));
@@ -572,6 +580,7 @@ void main() {
         }
         await tester.ensureVisible(find.text('Add to library'));
         await tester.pumpAndSettle();
+        expectCoverWidth('Add to library');
         await capture(tester, 'catalog-acquire-$name-ready');
         await tester.tap(find.text('Add to library'));
         await until(tester, () => controller.model.acquisition.busy);
@@ -589,6 +598,7 @@ void main() {
         await capture(tester, 'catalog-acquire-$name-edition-disabled');
         await tester.ensureVisible(find.text('Cancel'));
         await tester.pump();
+        expectCoverWidth('Cancel');
         await capture(tester, 'catalog-acquire-$name-progress');
         expect(opened, isNull);
         // Cancellation after publication must still report the committed book,
@@ -606,6 +616,7 @@ void main() {
         expect(changes, 1);
         await tester.ensureVisible(find.text('Read'));
         await tester.pumpAndSettle();
+        expectCoverWidth('Read');
         await capture(tester, 'catalog-acquire-$name-existing');
         await tester.tap(find.text('Read'));
         await tester.pump();
@@ -626,6 +637,7 @@ void main() {
         expect(controller.model.acquisition.locationChanged, false);
         await tester.ensureVisible(find.text('Add to library'));
         await tester.pumpAndSettle();
+        expectCoverWidth('Add to library');
         await capture(tester, 'catalog-acquire-$name-failed');
         // An old completion cannot replace the new book's acquisition state.
         bridge.pending = Completer<CatalogAddedBook>();

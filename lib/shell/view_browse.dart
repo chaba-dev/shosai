@@ -1089,7 +1089,11 @@ class _CatalogBookPage extends StatelessWidget {
               ],
               if (phone && details.editions.isNotEmpty) ...[
                 const SizedBox(height: ShosaiTokens.space5),
-                _CatalogAcquisitionControls(model: model, dispatch: dispatch),
+                _CatalogAcquisitionControls(
+                  model: model,
+                  dispatch: dispatch,
+                  phone: phone,
+                ),
               ],
             ],
           );
@@ -1148,6 +1152,7 @@ class _CatalogBookPage extends StatelessWidget {
                               _CatalogAcquisitionControls(
                                 model: model,
                                 dispatch: dispatch,
+                                phone: phone,
                               ),
                             ],
                           ],
@@ -1204,9 +1209,11 @@ class _CatalogAcquisitionControls extends StatelessWidget {
   const _CatalogAcquisitionControls({
     required this.model,
     required this.dispatch,
+    required this.phone,
   });
   final BrowseModel model;
   final ValueChanged<BrowseMessage> dispatch;
+  final bool phone;
 
   @override
   Widget build(BuildContext context) {
@@ -1216,9 +1223,12 @@ class _CatalogAcquisitionControls extends StatelessWidget {
     final selected = options?.locations
         .where((g) => g.id == options.selected)
         .firstOrNull;
-    final height = math.max(
-      ShosaiTokens.sizeTouchTarget,
-      shosaiShadButtonHeight(context),
+    final buttonConstraints = BoxConstraints(
+      minWidth: phone ? 0 : double.infinity,
+      minHeight: math.max(
+        ShosaiTokens.sizeTouchTarget,
+        shosaiShadButtonHeight(context),
+      ),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1235,7 +1245,7 @@ class _CatalogAcquisitionControls extends StatelessWidget {
           Align(
             alignment: AlignmentDirectional.centerStart,
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: height),
+              constraints: buttonConstraints,
               child: ShadButton(
                 height: 0,
                 onPressed: () => dispatch(const BrowseReadRequested()),
@@ -1256,7 +1266,7 @@ class _CatalogAcquisitionControls extends StatelessWidget {
               Align(
                 alignment: AlignmentDirectional.centerStart,
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: height),
+                  constraints: buttonConstraints,
                   child: ShadButton.outline(
                     height: 0,
                     onPressed: () =>
@@ -1326,7 +1336,7 @@ class _CatalogAcquisitionControls extends StatelessWidget {
               Align(
                 alignment: AlignmentDirectional.centerStart,
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: height),
+                  constraints: buttonConstraints,
                   child: ShadButton.outline(
                     height: 0,
                     onPressed: state.cancelling
@@ -1353,7 +1363,7 @@ class _CatalogAcquisitionControls extends StatelessWidget {
               Align(
                 alignment: AlignmentDirectional.centerStart,
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: height),
+                  constraints: buttonConstraints,
                   child: ShadButton(
                     height: 0,
                     enabled: !model.locationBusy && !state.locationChanged,
