@@ -105,9 +105,28 @@ Future<void> _importRdf(Database db, File input) async {
       rights_line TEXT NOT NULL,
       PRIMARY KEY (ebook_id, variant)
     ) STRICT;
+    CREATE TEMP TABLE listed_details (
+      ebook_id TEXT PRIMARY KEY,
+      summary TEXT,
+      reading_ease INTEGER
+    ) STRICT;
+    CREATE TEMP TABLE listed_agents (
+      ebook_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      birth_year INTEGER,
+      death_year INTEGER,
+      PRIMARY KEY (ebook_id, name)
+    ) STRICT;
   ''');
   final insert = db.prepare(
     'INSERT INTO listed_epubs VALUES (?, ?, ?, ?, ?, ?, ?)',
+  );
+  final insertDetails = db.prepare(
+    'INSERT INTO listed_details VALUES (?, ?, ?)',
+  );
+  // An agent appears once per role; its name and years do not change.
+  final insertAgent = db.prepare(
+    'INSERT INTO listed_agents VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
   );
   db.execute('BEGIN');
   try {
@@ -180,6 +199,42 @@ Future<void> _importRdf(Database db, File input) async {
           throw FormatException('Invalid RDF ebook ID: $about');
         }
         final id = match[1]!;
+        // Sort repeated values so record and element order cannot change output.
+        List<String> texts(String name) => {
+          for (final element in ebook.findElements(
+            name,
+            namespaceUri: _pgNamespace,
+          ))
+            if (element.innerText.trim().isNotEmpty) element.innerText.trim(),
+        }.toList()..sort();
+        final summary = texts('marc520').join('\n\n');
+        final ease = texts('marc908')
+            .map((note) => _readingEase.firstMatch(note)?[1])
+            .nonNulls
+            .map((score) => double.parse(score).round())
+            .firstOrNull;
+        if (summary.isNotEmpty || ease != null) {
+          insertDetails.execute([id, summary.isEmpty ? null : summary, ease]);
+        }
+        final agents = ebook.findAllElements(
+          'agent',
+          namespaceUri: _pgNamespace,
+        );
+        for (final agent in agents) {
+          final name = agent
+              .getElement('name', namespaceUri: _pgNamespace)
+              ?.innerText
+              .trim();
+          if (name == null || name.isEmpty) continue;
+          int? year(String element) => int.tryParse(
+            agent
+                    .getElement(element, namespaceUri: _pgNamespace)
+                    ?.innerText
+                    .trim() ??
+                '',
+          );
+          insertAgent.execute([id, name, year('birthdate'), year('deathdate')]);
+        }
         final rights = {
           for (final statement in ebook.findElements(
             'rights',
@@ -267,6 +322,8 @@ Future<void> _importRdf(Database db, File input) async {
     rethrow;
   } finally {
     insert.close();
+    insertDetails.close();
+    insertAgent.close();
   }
 }
 
@@ -469,6 +526,47 @@ Future<({int works, int editions, int skipped})> _importRows(
           authorId,
           position++,
         ]);
+        // The CSV appends ", <years>" and " [<role>]" to the RDF agent name.
+        final named = author.replaceFirst(_role, '');
+        final agent = statements
+            .putIfAbsent(
+              'agent',
+              () => db.prepare('''
+                SELECT name, birth_year, death_year FROM listed_agents
+                WHERE ebook_id = ? AND (? = name OR substr(?, 1, length(name) + 2) = name || ', ')
+                ORDER BY length(name) DESC LIMIT 1
+              '''),
+            )
+            .select([id, named, named])
+            .firstOrNull;
+        if (agent != null) {
+          write(
+            'INSERT INTO author_details VALUES (?, ?, ?, ?) '
+            'ON CONFLICT (author_id) DO NOTHING',
+            [
+              authorId,
+              _readingOrder(agent['name'] as String),
+              agent['birth_year'],
+              agent['death_year'],
+            ],
+          );
+        }
+      }
+      final details = statements
+          .putIfAbsent(
+            'details',
+            () => db.prepare(
+              'SELECT summary, reading_ease FROM listed_details WHERE ebook_id = ?',
+            ),
+          )
+          .select([id])
+          .firstOrNull;
+      if (details != null) {
+        write('INSERT INTO book_details VALUES (?, ?, ?)', [
+          work,
+          details['summary'],
+          details['reading_ease'],
+        ]);
       }
       final subjects = _values(field('Subjects'));
       for (final subject in subjects) {
@@ -544,6 +642,18 @@ Future<({int works, int editions, int skipped})> _importRows(
 }
 
 final _number = RegExp(r'^[1-9][0-9]*$');
+final _role = RegExp(r' \[[^\]]*\]$');
+final _readingEase = RegExp(r'^Reading ease score: (-?[0-9]+(?:\.[0-9]+)?)\b');
+
+/// "Austen, Jane" reads as "Jane Austen" and "Wells, H. G. (Herbert George)"
+/// as "H. G. Wells". Names with other comma structure stay as catalogued.
+String _readingOrder(String name) {
+  final plain = name.replaceAll(RegExp(r' \([^)]*\)'), '').trim();
+  final parts = plain.split(', ');
+  return parts.length == 2 && parts.every((part) => part.trim().isNotEmpty)
+      ? '${parts[1]} ${parts[0]}'
+      : plain;
+}
 
 // Exact LCSH genres only, when Gutenberg has not assigned a Browse category.
 const _subjectCategories = {
