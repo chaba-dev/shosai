@@ -545,7 +545,7 @@ Future<({int works, int editions, int skipped})> _importRows(
             'ON CONFLICT (author_id) DO NOTHING',
             [
               authorId,
-              _readingOrder(agent['name'] as String),
+              readingOrder(agent['name'] as String),
               agent['birth_year'],
               agent['death_year'],
             ],
@@ -645,15 +645,33 @@ final _number = RegExp(r'^[1-9][0-9]*$');
 final _role = RegExp(r' \[[^\]]*\]$');
 final _readingEase = RegExp(r'^Reading ease score: (-?[0-9]+(?:\.[0-9]+)?)\b');
 
-/// "Austen, Jane" reads as "Jane Austen" and "Wells, H. G. (Herbert George)"
-/// as "H. G. Wells". Names with other comma structure stay as catalogued.
-String _readingOrder(String name) {
+/// "Austen, Jane" reads as "Jane Austen", "Wells, H. G. (Herbert George)" as
+/// "H. G. Wells" and "Beethoven, Ludwig van" as "Ludwig van Beethoven".
+/// A comma does not always separate surname and forename: qualified headings
+/// such as "Henry VIII, King of England" or "Pliny, the Younger" stay as
+/// catalogued, as does any other comma structure.
+String readingOrder(String name) {
   final plain = name.replaceAll(RegExp(r' \([^)]*\)'), '').trim();
   final parts = plain.split(', ');
-  return parts.length == 2 && parts.every((part) => part.trim().isNotEmpty)
-      ? '${parts[1]} ${parts[0]}'
-      : plain;
+  if (parts.length != 2 || parts.any((part) => part.trim().isEmpty)) {
+    return plain;
+  }
+  final forenames = parts[1].trim().split(RegExp(r'\s+'));
+  final given =
+      _capitalised.hasMatch(forenames.first) &&
+      forenames.every(
+        (word) => _capitalised.hasMatch(word) || _particles.contains(word),
+      );
+  return given ? '${parts[1]} ${parts[0]}' : plain;
 }
+
+final _capitalised = RegExp(r'^\p{Lu}', unicode: true);
+// Name particles that may follow a forename; titles such as "of" and
+// epithets such as "the Younger" do not qualify.
+const _particles = {
+  'da', 'de', 'del', 'della', 'der', 'di', 'du', 'la', 'le', //
+  'ten', 'ter', 'van', 'von', 'zu',
+};
 
 // Exact LCSH genres only, when Gutenberg has not assigned a Browse category.
 const _subjectCategories = {

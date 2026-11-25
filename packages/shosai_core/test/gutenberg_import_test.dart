@@ -15,6 +15,26 @@ final _excerpt = File('test/fixtures/pg_catalog_excerpt.csv');
 final _rdf = File('test/fixtures/pg_catalog_excerpt.rdf');
 
 void main() {
+  test('only plain surname, forename headings are reordered', () {
+    // The last two are real Gutenberg agents (ebooks 32155 and 2811).
+    expect(
+      [
+        'Austen, Jane',
+        'Wells, H. G. (Herbert George)',
+        'Beethoven, Ludwig van',
+        'Henry VIII, King of England',
+        'Pliny, the Younger',
+      ].map(readingOrder),
+      [
+        'Jane Austen',
+        'H. G. Wells',
+        'Ludwig van Beethoven',
+        'Henry VIII, King of England',
+        'Pliny, the Younger',
+      ],
+    );
+  });
+
   test('reordered feed records export byte-identical catalog files', () async {
     final dir = tempDataDirectory();
     const header = 'Text#,Type,Title,Language,Authors,Subjects,Bookshelves\n';
