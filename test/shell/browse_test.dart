@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_core/src/catalog/catalog_database.dart'
+    show importCatalog;
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/library/view.dart';
@@ -1813,6 +1815,141 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
     });
+  }
+
+  // Opt-in specimens of a real book. Set SHOSAI_REAL_CATALOG to a catalog
+  // export built from Gutenberg's downloaded feed with
+  // packages/shosai_core/tool/{import_gutenberg,export_catalog_json}.dart.
+  // Covers are fetched live, so nothing from the source is checked in.
+  final realCatalog = Platform.environment['SHOSAI_REAL_CATALOG'];
+  for (final (name, size, dark) in [
+    ('desktop', const Size(1280, 900), false),
+    ('desktop-dark', const Size(1280, 900), true),
+    ('phone', const Size(430, 932), false),
+  ]) {
+    testWidgets(
+      '$name real book page',
+      timeout: const Timeout(Duration(minutes: 5)),
+      skip: realCatalog == null,
+      (tester) async {
+        HarnessView(size: size).apply(tester);
+        tester.platformDispatcher.platformBrightnessTestValue = dark
+            ? Brightness.dark
+            : Brightness.light;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final stage = Directory('${root.path}/real/snapshot')
+          ..createSync(recursive: true);
+        for (final file in Directory(realCatalog!).listSync(recursive: true)) {
+          if (file is! File) continue;
+          final target = File(
+            '${stage.path}${file.path.substring(realCatalog.length)}',
+          )..parent.createSync(recursive: true);
+          file.copySync(target.path);
+        }
+        importCatalog(
+          stage.path,
+          File('${stage.path}/manifest.json').readAsStringSync(),
+        );
+        File(
+          '${stage.path}/catalog.sqlite3',
+        ).copySync('${root.path}/real/catalog.sqlite3');
+        final real = CatalogClient(
+          '${root.path}/real',
+          userAgent: catalogUserAgent,
+          snapshot: Uri.parse('http://127.0.0.1:1/'),
+        );
+        addTearDown(real.close);
+        // Relays cover requests to the live sources, keeping their status so
+        // the page's own mirror and generated-cover fallbacks run.
+        final upstream = _RealCoverHttp().createHttpClient(null);
+        final server = (await tester.runAsync(() async {
+          final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+          server.listen((request) async {
+            final [host, ...path] = request.uri.pathSegments;
+            try {
+              final reply =
+                  await (await upstream.getUrl(Uri.https(host, path.join('/')))
+                        ..headers.set('User-Agent', catalogUserAgent))
+                      .close();
+              request.response.statusCode = reply.statusCode;
+              await request.response.addStream(reply);
+            } on Exception {
+              request.response.statusCode = 502;
+            }
+            await request.response.close();
+          });
+          return server;
+        }))!;
+        final client = _CoverHttpClient(server.port);
+        debugNetworkImageHttpClientProvider = () => client;
+        try {
+          final controller = BrowseController(
+            bridge: CatalogHarnessBridge(real),
+            openLink: (_) async {},
+          );
+          addTearDown(controller.dispose);
+          final layout = ShellLayout.forWidth(size.width);
+          await tester.pumpWidget(
+            productionShell(
+              home: Scaffold(
+                body: ListenableBuilder(
+                  listenable: controller,
+                  builder: (_, _) => ShellFrame(
+                    layout: layout,
+                    model: const ShellModel(place: ShellPlace.search),
+                    covers: const {},
+                    actions: ShellActions(
+                      selectPlace: (_) {},
+                      openBook: (_) {},
+                      closeBook: (_) {},
+                      addBooks: null,
+                      loadCover: (_) => false,
+                    ),
+                    child: ShellBrowsePage(
+                      layout: layout,
+                      model: controller.model,
+                      local: controller.local.model,
+                      dispatch: controller.dispatch,
+                      onChosen: (_) {},
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          controller.dispatch(const BrowseOpened());
+          controller.dispatch(
+            BrowseBookRequested(
+              Platform.environment['SHOSAI_REAL_CATALOG_BOOK'] ??
+                  'gutenberg:1342',
+            ),
+          );
+          await until(
+            tester,
+            () =>
+                controller.model.details != null &&
+                controller.model.saveOptions != null,
+          );
+          // Covers arrive over the live network; allow them about 15 s.
+          for (var i = 0; i < 100; i++) {
+            await tester.pump(const Duration(milliseconds: 50));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 100)),
+            );
+          }
+          await capture(tester, 'catalog-real-$name-book');
+          await tester.ensureVisible(find.text('View at source'));
+          await tester.pumpAndSettle();
+          await capture(tester, 'catalog-real-$name-book-source');
+          await tester.pumpWidget(const SizedBox());
+        } finally {
+          debugNetworkImageHttpClientProvider = null;
+          client.close(force: true);
+          upstream.close(force: true);
+          await tester.runAsync(() => server.close(force: true));
+        }
+      },
+    );
   }
 }
 
