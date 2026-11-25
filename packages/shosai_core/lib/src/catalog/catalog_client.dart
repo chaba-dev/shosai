@@ -188,12 +188,14 @@ final class CatalogClient {
   }
 
   Future<Map<String, List<CatalogBook>>> categoryPreviews({
+    required List<String> categoryIds,
     CancellationToken? cancellation,
   }) {
     _checkOpen();
+    if (categoryIds.isEmpty) return Future.value(const {});
     final database = _database;
     return runCancellable(
-      () => catalogCategoryPreviews(database),
+      () => catalogCategoryPreviews(database, categoryIds),
       cancellation: cancellation,
     );
   }

@@ -11,6 +11,7 @@ import 'package:shosai_flutter/shell/notes_controller.dart';
 import 'package:shosai_flutter/shell/search_controller.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/catalog.dart';
+import 'package:shosai_flutter/shell/catalog_artwork.dart';
 import 'package:shosai_flutter/shell/browse_controller.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 

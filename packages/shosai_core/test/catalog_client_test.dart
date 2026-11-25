@@ -56,7 +56,7 @@ void main() {
     () async {
       expect(await client.search(query: '猫'), isEmpty);
       expect(await client.book('cat'), isNull);
-      expect(await client.categoryPreviews(), isEmpty);
+      expect(await client.categoryPreviews(categoryIds: ['fiction']), isEmpty);
       expect(await client.isInstalled, isFalse);
       expect(await client.refresh(), CatalogRefresh.installed);
       expect(await client.isInstalled, isTrue);
@@ -102,7 +102,11 @@ void main() {
       expect(await client.categories(), [
         (id: 'fiction', label: 'Fiction', books: 2),
       ]);
-      final previews = await client.categoryPreviews();
+      expect(await client.categoryPreviews(categoryIds: []), isEmpty);
+      expect(await client.categoryPreviews(categoryIds: ['missing']), isEmpty);
+      final previews = await client.categoryPreviews(
+        categoryIds: ['missing', 'fiction', 'fiction'],
+      );
       expect(previews.keys, ['fiction']);
       expect(previews['fiction']!.map((b) => b.id), ['cat', 'pride']);
       expect(previews['fiction']!.last.title, 'Pride and Prejudice');
@@ -163,6 +167,19 @@ void main() {
         before,
         reason: 'Local queries must never send search terms',
       );
+      final db = sqlite3.open('${client.directory}/catalog.sqlite3');
+      try {
+        db.execute(
+          "INSERT INTO categories(id,label) VALUES ('unrequested','Other')",
+        );
+        db.execute('''INSERT INTO book_categories(book_id,category_id)
+          VALUES ('symbols','fiction'), ('symbols','unrequested')''');
+      } finally {
+        db.close();
+      }
+      final bounded = await client.categoryPreviews(categoryIds: ['fiction']);
+      expect(bounded.keys, ['fiction']);
+      expect(bounded['fiction']!.map((book) => book.id), ['cat', 'pride']);
     },
   );
 

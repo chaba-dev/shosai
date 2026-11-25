@@ -11,6 +11,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_flutter/shell/catalog_artwork.dart';
 import 'package:shosai_flutter/shell/view.dart';
 
 import '../support/catalog_fixture.dart';
@@ -64,6 +65,10 @@ void main() {
               )
               as Map<String, dynamic>;
       final categories = provenance['categories'] as List<dynamic>;
+      expect(catalogCategoryArtwork, {
+        for (final dynamic row in categories)
+          row['id'] as String: 'assets/catalog/categories/${row['image']}',
+      });
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
       expect(
         manifest.listAssets().where(
@@ -260,7 +265,7 @@ void main() {
     const label = 'Research Methods/Statistics/Information Sys';
     final semantics = tester.ensureSemantics();
     for (final width in [360.0, 1280.0]) {
-      for (final scale in [1.0, 2.0]) {
+      for (final scale in [.85, 1.0, 2.0]) {
         HarnessView(size: Size(width, 900), textScale: scale).apply(tester);
         BrowseMessage? intent;
         await tester.pumpWidget(
@@ -274,6 +279,11 @@ void main() {
                     (id: 'gutenberg:Poetry', label: 'Poetry', books: 1234),
                     (id: 'science', label: 'Science fiction', books: 19),
                     (id: 'history', label: 'History', books: 8),
+                    (
+                      id: 'gutenberg:Science-Fiction & Fantasy',
+                      label: 'Science-Fiction & Fantasy',
+                      books: 2419,
+                    ),
                   ],
                 ),
                 local: const ShellSearchModel(),
@@ -286,19 +296,29 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(ChoiceChip), findsNothing);
         final first = tester.getRect(
-          find.byKey(const ValueKey('catalog-category-gutenberg:Poetry')),
+          find.byKey(
+            const ValueKey(
+              'catalog-category-gutenberg:Science-Fiction & Fantasy',
+            ),
+          ),
         );
         final second = tester.getRect(
-          find.byKey(const ValueKey('catalog-category-research')),
+          find.byKey(const ValueKey('catalog-category-gutenberg:Poetry')),
         );
-        for (final id in ['research', 'science', 'history']) {
+        for (final id in [
+          'research',
+          'science',
+          'history',
+          'gutenberg:Science-Fiction & Fantasy',
+        ]) {
           final size = tester.getSize(
             find.byKey(ValueKey('catalog-category-$id')),
           );
           expect(size.width, closeTo(first.width, .001));
           expect(size.height, closeTo(first.height, .001));
         }
-        if (scale == 1 || width == 1280) {
+        expect(first.height, greaterThanOrEqualTo(width == 360 ? 112 : 128));
+        if (scale <= 1 || width == 1280) {
           expect(first.top, second.top);
           expect(first.right, lessThan(second.left));
         } else {
@@ -315,6 +335,97 @@ void main() {
     }
     semantics.dispose();
   });
+
+  testWidgets('a colliding category name never borrows bundled artwork', (
+    tester,
+  ) async {
+    const HarnessView(size: Size(360, 740)).apply(tester);
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: ShellBrowsePage(
+            layout: ShellLayout.phone,
+            model: const BrowseModel(
+              categories: [
+                (
+                  id: 'gutenberg:Science Fiction & Fantasy',
+                  label: 'New category',
+                  books: 1,
+                ),
+              ],
+            ),
+            local: const ShellSearchModel(),
+            dispatch: (_) {},
+            onChosen: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final card = find.byKey(
+      const ValueKey('catalog-category-gutenberg:Science Fiction & Fantasy'),
+    );
+    expect(card, findsOneWidget);
+    expect(
+      find.descendant(of: card, matching: find.byType(Image)),
+      findsNothing,
+    );
+    await capture(tester, 'catalog-unregistered-collision');
+  });
+
+  test(
+    'early submissions merge persisted history and serialize saves',
+    () async {
+      final bridge = _DelayedHistoryBridge(catalog)
+        ..recentSearches = ['Earlier', 'Oldest'];
+      final controller = BrowseController(
+        bridge: bridge,
+        openLink: (_) async {},
+      );
+      controller.dispatch(const BrowseOpened());
+      void submit(String query) {
+        controller.dispatch(
+          BrowseChanged((
+            query: query,
+            filter: BrowseFilter.all,
+            category: null,
+            language: null,
+            source: null,
+            author: null,
+          )),
+        );
+        controller.dispatch(const BrowseSearchSubmitted());
+      }
+
+      submit('New');
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.recentSearches, ['Earlier', 'Oldest']);
+      bridge.initialRead.complete(['Earlier', 'Oldest']);
+      await bridge.writeStarted.future;
+      expect(controller.model.recentSearches, ['New', 'Earlier', 'Oldest']);
+      submit('Newest');
+      await Future<void>.delayed(Duration.zero);
+      // The second save must not overtake the held first save.
+      expect(bridge.recentSearches, ['Earlier', 'Oldest']);
+      bridge.firstWrite.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.recentSearches, ['Newest', 'New', 'Earlier', 'Oldest']);
+      final restarted = BrowseController(
+        bridge: bridge,
+        openLink: (_) async {},
+      );
+      restarted.dispatch(const BrowseOpened());
+      await Future<void>.delayed(Duration.zero);
+      expect(restarted.model.recentSearches, [
+        'Newest',
+        'New',
+        'Earlier',
+        'Oldest',
+      ]);
+      controller.dispose();
+      restarted.dispose();
+    },
+  );
 
   for (final dark in [false, true]) {
     testWidgets(
@@ -1430,6 +1541,29 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
     });
+  }
+}
+
+class _DelayedHistoryBridge extends CatalogHarnessBridge {
+  _DelayedHistoryBridge(super.catalog);
+  final initialRead = Completer<List<String>>();
+  final firstWrite = Completer<void>();
+  final writeStarted = Completer<void>();
+  bool _read = false;
+  @override
+  Future<List<String>> recentCatalogSearches() {
+    if (_read) return super.recentCatalogSearches();
+    _read = true;
+    return initialRead.future;
+  }
+
+  @override
+  Future<void> saveRecentCatalogSearches(List<String> queries) async {
+    if (!writeStarted.isCompleted) {
+      writeStarted.complete();
+      await firstWrite.future;
+    }
+    await super.saveRecentCatalogSearches(queries);
   }
 }
 

@@ -492,18 +492,6 @@
       "image": "gutenberg-engineering-technology.png",
       "covers": [
         {
-          "bookId": "gutenberg:181",
-          "title": "The Project Gutenberg RST Manual",
-          "gutenbergId": "181",
-          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/181/pg181.cover.medium.jpg",
-          "sourcePage": "https://www.gutenberg.org/ebooks/181",
-          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/181/pg181.cover.medium.jpg",
-          "coverSha256": "5190cf556294d2d3d28dc2ec6112401f837dce3429430ffb4c0532a3f15fd50f",
-          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/181/pg181.rdf",
-          "rdfSha256": "6aa02f99fa99d4309bddb72657a4fc81e710596ecc6b4d06a4cf6b4a51cbefb6",
-          "rights": "Public domain in the USA."
-        },
-        {
           "bookId": "gutenberg:12443",
           "title": "The jute industry",
           "gutenbergId": "12443",
@@ -514,9 +502,21 @@
           "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/12443/pg12443.rdf",
           "rdfSha256": "932080562e7dd8e5b23ad465097d4df587056184291faaa63b0009feca10982d",
           "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:27936",
+          "title": "Histoire des nombres et de la numération mécanique",
+          "gutenbergId": "27936",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/27936/pg27936.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/27936",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/27936/pg27936.cover.medium.jpg",
+          "coverSha256": "55a690929f6d23f54974ef30f3481ebadd0fba139542ffa6477b91f510323333",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/27936/pg27936.rdf",
+          "rdfSha256": "14cc09058fc3f2262ca88a692006c975ec11354e46a44e920d362c7367b1d2d4",
+          "rights": "Public domain in the USA."
         }
       ],
-      "sha256": "bcfd346cc0e971da8bac26d242bcbd281c54f3fcd8327512fa490721074ba5da"
+      "sha256": "6b38bb1de1b2840f7528c55ca5752f3580ed153f40f6b1a01f4995b6bf563f33"
     },
     {
       "id": "gutenberg:Environmental Issues",
@@ -1164,18 +1164,6 @@
       "image": "gutenberg-how-to-.png",
       "covers": [
         {
-          "bookId": "gutenberg:181",
-          "title": "The Project Gutenberg RST Manual",
-          "gutenbergId": "181",
-          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/181/pg181.cover.medium.jpg",
-          "sourcePage": "https://www.gutenberg.org/ebooks/181",
-          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/181/pg181.cover.medium.jpg",
-          "coverSha256": "5190cf556294d2d3d28dc2ec6112401f837dce3429430ffb4c0532a3f15fd50f",
-          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/181/pg181.rdf",
-          "rdfSha256": "6aa02f99fa99d4309bddb72657a4fc81e710596ecc6b4d06a4cf6b4a51cbefb6",
-          "rights": "Public domain in the USA."
-        },
-        {
           "bookId": "gutenberg:1593",
           "title": "How to Tell the Birds from the Flowers: A Manual of Flornithology for Beginners",
           "gutenbergId": "1593",
@@ -1186,9 +1174,21 @@
           "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1593/pg1593.rdf",
           "rdfSha256": "e91f22c70710fdd3804bfa398b136383f3a654569bc544d5a9416e23c69ee619",
           "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:5614",
+          "title": "Chess Strategy",
+          "gutenbergId": "5614",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/5614/pg5614.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/5614",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/5614/pg5614.cover.medium.jpg",
+          "coverSha256": "2fec56d95599ad15ae79dbfea97b4f332bb11c50c99ef1294277c4d3a7a82f01",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/5614/pg5614.rdf",
+          "rdfSha256": "42767e2f8de9e9cc3255a9543e24c1c4d4686a866e3decdc47130f095d105057",
+          "rights": "Public domain in the USA."
         }
       ],
-      "sha256": "b638f17de893d1c3c61220958ec56ec07d64ec0df768fbe4a7905cd7d1dbd2de"
+      "sha256": "6c3e5ea25d85a4ec9513861d231bcb649980a4ead06ec352fc61cf5b5ed762db"
     },
     {
       "id": "gutenberg:Humour",

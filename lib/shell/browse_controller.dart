@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shosai_core/shosai_core.dart' show CancellationToken;
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/catalog.dart';
+import 'package:shosai_flutter/shell/catalog_artwork.dart';
 import 'package:shosai_flutter/shell/search_controller.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
@@ -61,6 +62,9 @@ class BrowseController extends ChangeNotifier {
   bool _disposed = false;
   bool _refreshing = false;
   bool _historyRequested = false;
+  bool _historyLoaded = false;
+  bool _historyDirty = false;
+  Future<void> _historyWrite = Future.value();
 
   void _localChanged() {
     if (!_disposed) notifyListeners();
@@ -115,6 +119,8 @@ class BrowseController extends ChangeNotifier {
             }.take(8).toList(),
           ),
         );
+        _historyLoaded = true;
+        _persistHistory();
       case BrowseSearchSubmitted():
         _rememberSearch();
       case BrowseChanged(:final criteria):
@@ -436,14 +442,23 @@ class BrowseController extends ChangeNotifier {
       ..._model.recentSearches.where((s) => s != query),
     ].take(8).toList();
     _emit(_model.copyWith(recentSearches: searches));
+    _historyDirty = true;
+    _persistHistory();
+  }
+
+  void _persistHistory() {
+    if (!_historyLoaded || !_historyDirty) return;
+    _historyDirty = false;
     if (_bridge case final CatalogHost host) {
-      unawaited(() async {
+      final searches = _model.recentSearches;
+      _historyWrite = _historyWrite.then((_) async {
         try {
           await host.saveRecentCatalogSearches(searches);
         } catch (_) {
           // History is best-effort; personal and catalog search remain usable.
         }
-      }());
+      });
+      unawaited(_historyWrite);
     }
   }
 
@@ -529,7 +544,14 @@ class BrowseController extends ChangeNotifier {
             c.category == null &&
             c.author == null) {
           categoryBooks =
-              await catalog?.categoryPreviews(cancellation: cancellation) ??
+              await catalog?.categoryPreviews(
+                categoryIds: [
+                  for (final category in categories)
+                    if (!catalogCategoryArtwork.containsKey(category.id))
+                      category.id,
+                ],
+                cancellation: cancellation,
+              ) ??
               const {};
         }
         var books = const <CatalogBook>[];

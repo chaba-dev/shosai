@@ -616,8 +616,9 @@ class _CatalogCategoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
     final count = AppLocalizations.of(context).catalogBookCount(category.books);
-    final scale = MediaQuery.textScalerOf(context).scale(1);
+    final scale = math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
     final featured = _catalogFeatured[category.id];
+    final artwork = catalogCategoryArtwork[category.id];
     return _ShellPressable(
       onPressed: onPressed,
       semanticLabel: '${category.label}, $count',
@@ -658,35 +659,36 @@ class _CatalogCategoryCard extends StatelessWidget {
                   ? math.max(0.0, 192 - width) / 2
                   : 0.0;
               final artWidth = width - artInset;
+              final preview = Stack(
+                children: [
+                  for (var i = 0; i < books.length; i++)
+                    Positioned(
+                      left: artWidth * (i == 0 ? .68 : .80),
+                      bottom: ShosaiTokens.space3,
+                      width: artWidth * (i == 0 ? .24 : .17),
+                      child: Transform.rotate(
+                        angle: i == 0 ? -.20 : .18,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(boxShadow: palette.raised),
+                          child: _CatalogCover(book: books[i]),
+                        ),
+                      ),
+                    ),
+                ],
+              );
               return Stack(
                 children: [
                   Positioned.fill(
                     left: artInset,
-                    child: Image.asset(
-                      'assets/catalog/categories/${category.id.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '-').toLowerCase()}.png',
-                      fit: BoxFit.fitWidth,
-                      alignment: Alignment.bottomRight,
-                      excludeFromSemantics: true,
-                      errorBuilder: (_, _, _) => Stack(
-                        children: [
-                          for (var i = 0; i < books.length; i++)
-                            Positioned(
-                              left: artWidth * (i == 0 ? .68 : .80),
-                              bottom: ShosaiTokens.space3,
-                              width: artWidth * (i == 0 ? .24 : .17),
-                              child: Transform.rotate(
-                                angle: i == 0 ? -.20 : .18,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    boxShadow: palette.raised,
-                                  ),
-                                  child: _CatalogCover(book: books[i]),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
+                    child: artwork == null
+                        ? preview
+                        : Image.asset(
+                            artwork,
+                            fit: BoxFit.fitWidth,
+                            alignment: Alignment.bottomRight,
+                            excludeFromSemantics: true,
+                            errorBuilder: (_, _, _) => preview,
+                          ),
                   ),
                   Padding(
                     padding: const EdgeInsets.all(ShosaiTokens.space3),
@@ -717,7 +719,9 @@ class _CatalogCategoryCard extends StatelessWidget {
                           ),
                           const SizedBox(height: ShosaiTokens.space1),
                           SizedBox(
-                            width: books.isEmpty || featured == null
+                            width:
+                                (books.isEmpty && artwork == null) ||
+                                    featured == null
                                 ? null
                                 : width * .64 - ShosaiTokens.space3,
                             child: Text(

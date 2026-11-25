@@ -68,9 +68,13 @@ class CatalogCategoryArtTest(unittest.TestCase):
                         subprocess.run(["magick", "-size", "12x18", f"xc:rgb({colour_id*20},40,80)",
                                         str(cache / f"{id}.jpg")], check=True)
             output = root / "art"
+            index = root / "catalog_artwork.dart"
             result = subprocess.run([sys.executable, str(SCRIPT), str(catalog), str(cache),
-                                     "--output", str(output)], capture_output=True, text=True)
+                                     "--output", str(output), "--dart-index", str(index)],
+                                    capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('"gutenberg:Test/Category":', index.read_text())
+            self.assertIn("'assets/catalog/categories/gutenberg-test-category.png'", index.read_text())
             manifest = json.loads((output / "sources.json").read_text())
             category, = manifest["categories"]
             self.assertEqual(category["id"], "gutenberg:Test/Category")
