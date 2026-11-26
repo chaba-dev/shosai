@@ -4,6 +4,9 @@
      Descriptions: 1342 has a summary, a reading-ease note and one author;
      417 has a negative score, an unparseable note and an agent repeated
      under two roles; 42671 and 99 have none.
+     Unlisted EPUBs: 79882 lists only its uploaded text and HTML, as a new
+     release does; 59248 lists only uploaded PDF and TeX; 70427 lists its
+     uploaded text beside generated HTML.
      Namespace prefixes differ from Gutenberg's to exercise URI resolution. -->
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
          xmlns:p="http://www.gutenberg.org/2009/pgterms/"
@@ -61,6 +64,43 @@
   <p:ebook rdf:about="ebooks/99">
     <d:hasFormat>
       <p:file rdf:about="https://www.gutenberg.org/ebooks/99.epub3.images">
+        <d:format><rdf:Description><rdf:value>text/html</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+  </p:ebook>
+  <p:ebook rdf:about="ebooks/79882">
+    <d:rights>Public domain in the USA.</d:rights>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/files/79882/79882-h/79882-h.htm">
+        <d:format><rdf:Description><rdf:value>text/html</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/files/79882/79882-0.txt">
+        <d:format><rdf:Description><rdf:value>text/plain; charset=utf-8</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+  </p:ebook>
+  <p:ebook rdf:about="ebooks/59248">
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/files/59248/59248-pdf.pdf">
+        <d:format><rdf:Description><rdf:value>application/pdf</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/files/59248/59248-t/59248-t.tex">
+        <d:format><rdf:Description><rdf:value>application/x-tex</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+  </p:ebook>
+  <p:ebook rdf:about="ebooks/70427">
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/files/70427/70427-0.txt">
+        <d:format><rdf:Description><rdf:value>text/plain; charset=utf-8</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/70427.html.images">
         <d:format><rdf:Description><rdf:value>text/html</rdf:value></rdf:Description></d:format>
       </p:file>
     </d:hasFormat>

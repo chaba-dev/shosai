@@ -243,12 +243,20 @@ Future<void> _importRdf(Database db, File input) async {
             if (statement.innerText.trim().isNotEmpty)
               statement.innerText.trim(),
         }.toList()..sort();
+        final rightsLine = rights.isEmpty
+            ? 'Rights not listed in the offline catalog. Check Project Gutenberg.'
+            : rights.join('\n');
+        final files = <String>[];
+        var listed = false;
         for (final format in ebook.findElements(
           'hasFormat',
           namespaceUri: _dcNamespace,
         )) {
           final file = format.getElement('file', namespaceUri: _pgNamespace);
           if (file == null) continue;
+          files.add(
+            file.getAttribute('about', namespaceUri: _rdfNamespace) ?? '',
+          );
           final epub = file
               .findElements('format', namespaceUri: _dcNamespace)
               .any(
@@ -306,9 +314,41 @@ Future<void> _importRdf(Database db, File input) async {
             preference,
             url.toString(),
             size,
-            rights.isEmpty
-                ? 'Rights not listed in the offline catalog. Check Project Gutenberg.'
-                : rights.join('\n'),
+            rightsLine,
+          ]);
+          listed = true;
+        }
+        // A new release lists only its uploaded sources until Gutenberg adds
+        // the formats it generates, while it already serves the EPUBs. List
+        // the two standard variants, sizes unknown, for a record of uploaded
+        // sources that include its main text. TeX and PDF works, and records
+        // with generated formats but no EPUB, stay unlisted.
+        final uploads = '$_base/files/$id/';
+        if (!listed &&
+            files.isNotEmpty &&
+            files.every((url) => url.startsWith(uploads)) &&
+            files.any(
+              (url) =>
+                  url == '$uploads$id-0.txt' ||
+                  url == '$uploads$id-h/$id-h.htm',
+            )) {
+          insert.execute([
+            id,
+            'images',
+            'EPUB3 with images',
+            0,
+            '$_base/ebooks/$id.epub3.images',
+            null,
+            rightsLine,
+          ]);
+          insert.execute([
+            id,
+            'noimages',
+            'EPUB2 without images',
+            2,
+            '$_base/ebooks/$id.epub.noimages',
+            null,
+            rightsLine,
           ]);
         }
       }

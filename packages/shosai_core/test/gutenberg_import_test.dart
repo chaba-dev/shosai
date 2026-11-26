@@ -370,6 +370,57 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
   });
 
   test(
+    'lists standard EPUBs only for a release whose RDF has just its uploads',
+    () async {
+      final dir = tempDataDirectory();
+      final input = File('${dir.path}/catalog.csv')
+        ..writeAsStringSync(
+          '${_excerpt.readAsStringSync()}'
+          '79882,Text,2026-10-30,Gallipoli memories,en,,,,\n'
+          '59248,Text,2019-04-11,The Mathematical Theory of Relativity,en,,,,\n'
+          '70427,Text,2022-04-01,Generated HTML only,en,,,,\n',
+        );
+      final output = File('${dir.path}/catalog.sqlite');
+      expect(await importGutenbergFile(input, output, rdf: _rdf), (
+        works: 4,
+        editions: 7,
+        skipped: 3,
+      ));
+      final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+      addTearDown(db.close);
+      expect(
+        db
+            .select('''
+      SELECT book_id, variant_label, display_order, acquisition_url,
+        size_bytes, rights_line
+      FROM editions WHERE book_id IN
+        ('gutenberg:79882', 'gutenberg:59248', 'gutenberg:70427')
+      ORDER BY book_id, display_order
+    ''')
+            .map((row) => row.values),
+        [
+          [
+            'gutenberg:79882',
+            'EPUB3 with images',
+            0,
+            'https://www.gutenberg.org/ebooks/79882.epub3.images',
+            null,
+            'Public domain in the USA.',
+          ],
+          [
+            'gutenberg:79882',
+            'EPUB2 without images',
+            1,
+            'https://www.gutenberg.org/ebooks/79882.epub.noimages',
+            null,
+            'Public domain in the USA.',
+          ],
+        ],
+      );
+    },
+  );
+
+  test(
     'streams independent RDF documents from an archive without extracting files',
     () async {
       final dir = tempDataDirectory();
