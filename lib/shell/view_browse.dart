@@ -841,12 +841,6 @@ class _CatalogBookPage extends StatelessWidget {
       offset: 4,
       radius: BorderRadius.circular(ShosaiTokens.radiusSm + 4),
     );
-    final sourceButtonConstraints = BoxConstraints(
-      minHeight: math.max(
-        ShosaiTokens.sizeTouchTarget,
-        shosaiShadButtonHeight(context),
-      ),
-    );
     Widget editionLabel(CatalogEdition edition, {bool selected = false}) =>
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1155,19 +1149,14 @@ class _CatalogBookPage extends StatelessWidget {
                   ),
                 const SizedBox(height: ShosaiTokens.space3),
                 Wrap(
-                  spacing: ShosaiTokens.space2,
-                  runSpacing: ShosaiTokens.space2,
+                  spacing: ShosaiTokens.space5,
                   children: [
-                    ConstrainedBox(
-                      constraints: sourceButtonConstraints,
-                      child: ShadButton.outline(
-                        height: 0,
-                        onPressed: () => dispatch(
-                          BrowseLinkRequested(
-                            details.editions[model.edition].sourceUrl,
-                          ),
+                    ShellLink(
+                      label: l10n.catalogViewSource,
+                      onPressed: () => dispatch(
+                        BrowseLinkRequested(
+                          details.editions[model.edition].sourceUrl,
                         ),
-                        child: Flexible(child: Text(l10n.catalogViewSource)),
                       ),
                     ),
                     if (details.editions[model.edition].supportUrl
