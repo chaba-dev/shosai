@@ -12,14 +12,17 @@ Flutter widgets, so its behaviour is tested with `dart test`.
 From this package, run `dart run tool/export_catalog_json.dart INPUT.sqlite
 NEW_DIRECTORY` on a catalog database, such as the Gutenberg importer's output.
 Use a new directory in a private staging location; the exporter does not deploy
-anything. Commit the resulting snapshot as Hugo static assets in the
-[maintainer-only website repository](https://github.com/chaba-dev/shosai-website),
-not as app bundle assets. Readers can fetch the published
-[catalog revision index](https://www.readshosai.com/catalog/revisions.json).
-The [maintainer-only weekly refresh documentation](https://github.com/chaba-dev/shosai-website#scheduled-refresh-prs)
-describes publication. Import with `dart run tool/import_gutenberg.dart
+anything. Promote the staged export into `static/catalog/` in the
+[maintainer-only catalog repository](https://github.com/chaba-dev/shosai-catalog)
+using its [manual promotion and recovery instructions](https://github.com/chaba-dev/shosai-catalog#manual-promotion-and-recovery),
+then commit the catalog-only proposal there, not as website or app bundle assets.
+Readers can fetch the published
+[catalog revision index](https://catalog.shosai.dev/revisions.json).
+The catalog repository's [weekly refresh runbook](https://github.com/chaba-dev/shosai-catalog#scheduled-refresh-prs)
+describes generation and publication safeguards. Import with `dart run tool/import_gutenberg.dart
 DOWNLOADED_CSV_OR_CSV_GZ DOWNLOADED_RDF_TAR_BZ2 NEW.sqlite` before exporting;
-website automation must pin a revision supporting this three-path interface.
+catalog refresh automation must pin a merged Shōsai revision supporting this
+three-path interface.
 A plain `.rdf` file is also accepted for the second input. The importer joins
 CSV search metadata with RDF-listed EPUB URLs, sizes and rights. Until Gutenberg
 adds the formats it generates, a new release's RDF lists only its uploaded

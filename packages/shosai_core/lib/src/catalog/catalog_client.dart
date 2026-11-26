@@ -35,8 +35,7 @@ final class CatalogClient {
     required this.userAgent,
     Uri? snapshot,
     DateTime Function()? clock,
-  }) : snapshot =
-           snapshot ?? Uri.parse('https://www.readshosai.com/catalog/current/'),
+  }) : snapshot = snapshot ?? Uri.parse('https://catalog.shosai.dev/current/'),
        _clock = clock ?? DateTime.now;
 
   final String directory;
