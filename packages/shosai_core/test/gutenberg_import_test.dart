@@ -15,6 +15,35 @@ final _excerpt = File('test/fixtures/pg_catalog_excerpt.csv');
 final _rdf = File('test/fixtures/pg_catalog_excerpt.rdf');
 
 void main() {
+  test('only personal-name inversions are reordered', () {
+    // Real Gutenberg agents that are not personal-name inversions, the first
+    // five from ebooks 32155, 2811, 53979, 69367 and 47147.
+    const kept = [
+      'Henry VIII, King of England',
+      'Pliny, the Younger',
+      'Alfred A. Knopf, Inc.',
+      'Anti-slavery Society of Meriden, Conn.',
+      'British Museum (Natural History). Department of Mineralogy',
+      'Chrétien, de Troyes',
+    ];
+    expect(
+      [
+        'Austen, Jane',
+        'Wells, H. G. (Herbert George)',
+        'Beethoven, Ludwig van',
+        'Tolkien, J.R.R.',
+        ...kept,
+      ].map(readingOrder),
+      [
+        'Jane Austen',
+        'H. G. Wells',
+        'Ludwig van Beethoven',
+        'J.R.R. Tolkien',
+        ...kept,
+      ],
+    );
+  });
+
   test('reordered feed records export byte-identical catalog files', () async {
     final dir = tempDataDirectory();
     const header = 'Text#,Type,Title,Language,Authors,Subjects,Bookshelves\n';
@@ -134,6 +163,40 @@ void main() {
           'Allen, Nathan H. (Nathan Hale), 1848-1925 [Editor]',
           'Bacon, Leonard Woolsey, 1830-1907 [Editor]',
         ],
+      );
+      expect(db.select('SELECT * FROM author_details ORDER BY author_id'), [
+        {
+          'author_id':
+              'gutenberg:Allen, Nathan H. (Nathan Hale), 1848-1925 [Editor]',
+          'display_name': 'Nathan H. Allen',
+          'birth_year': 1848,
+          'death_year': null,
+        },
+        {
+          'author_id': 'gutenberg:Austen, Jane, 1775-1817',
+          'display_name': 'Jane Austen',
+          'birth_year': 1775,
+          'death_year': 1817,
+        },
+        {
+          'author_id': 'gutenberg:Luther, Martin, 1483-1546',
+          'display_name': 'Martin Luther',
+          'birth_year': 1483,
+          'death_year': 1546,
+        },
+      ]);
+      expect(db.select('SELECT * FROM book_details ORDER BY book_id'), [
+        {
+          'book_id': 'gutenberg:1342',
+          'summary':
+              'A novel of manners. (This is an automatically generated summary.)',
+          'reading_ease': 69,
+        },
+        {'book_id': 'gutenberg:417', 'summary': null, 'reading_ease': -13},
+      ]);
+      expect(
+        db.select('SELECT support_url FROM sources').single['support_url'],
+        'https://www.gutenberg.org/donate/',
       );
       expect(
         db

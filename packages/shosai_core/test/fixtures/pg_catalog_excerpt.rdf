@@ -1,12 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Reduced format metadata for importer tests. Deliberately asymmetric:
      three EPUBs, EPUB3 only, EPUB2 without images only, and HTML only.
+     Descriptions: 1342 has a summary, a reading-ease note and one author;
+     417 has a negative score, an unparseable note and an agent repeated
+     under two roles; 42671 and 99 have none.
      Namespace prefixes differ from Gutenberg's to exercise URI resolution. -->
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
          xmlns:p="http://www.gutenberg.org/2009/pgterms/"
          xmlns:d="http://purl.org/dc/terms/">
   <p:ebook rdf:about="ebooks/417">
     <d:rights>Public domain in the USA.</d:rights>
+    <d:creator><p:agent rdf:about="2009/agents/1"><p:name>Luther, Martin</p:name><p:birthdate>1483</p:birthdate><p:deathdate>1546</p:deathdate></p:agent></d:creator>
+    <p:edt><p:agent rdf:about="2009/agents/2"><p:name>Allen, Nathan H. (Nathan Hale)</p:name><p:birthdate>1848</p:birthdate></p:agent></p:edt>
+    <p:edt><p:agent rdf:about="2009/agents/2"><p:name>Allen, Nathan H. (Nathan Hale)</p:name><p:birthdate>1848</p:birthdate></p:agent></p:edt>
+    <p:marc908>Grade level unavailable.</p:marc908>
+    <p:marc908>Reading ease score: -12.5 (Graduate level). Very difficult to read.</p:marc908>
     <d:hasFormat>
       <p:file rdf:about="https://www.gutenberg.org/ebooks/417.epub.noimages">
         <d:extent>41234</d:extent>
@@ -33,6 +41,9 @@
   </p:ebook>
   <p:ebook rdf:about="ebooks/1342">
     <d:rights>Public domain in the USA.</d:rights>
+    <d:creator><p:agent rdf:about="2009/agents/68"><p:name>Austen, Jane</p:name><p:birthdate>1775</p:birthdate><p:deathdate>1817</p:deathdate></p:agent></d:creator>
+    <p:marc520>A novel of manners. (This is an automatically generated summary.)</p:marc520>
+    <p:marc908>Reading ease score: 69.2 (8th &amp; 9th grade). Neither easy nor difficult to read.</p:marc908>
     <d:hasFormat>
       <p:file rdf:about="https://www.gutenberg.org/ebooks/1342.epub3.images">
         <d:extent>24836548</d:extent>
