@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-25
+## [0.1.0] - 2026-11-26
 
 ### 🚀 Features
 
@@ -83,6 +83,8 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Export Git-friendly JSON snapshots (#340)
 - *(catalog)* Check in validated Gutenberg snapshots (#341)
 - *(catalog)* Schedule Gutenberg catalog refresh PRs (#342)
+- *(catalog)* Browse and add free books (#347)
+- *(catalog)* Match the book page mock (#354)
 
 ### 🐛 Bug Fixes
 
@@ -140,6 +142,9 @@ All notable changes to this project will be documented in this file.
 - Refresh shelf after unlocking a PDF (#334)
 - *(a11y)* Name protected-book dialog controls (#343)
 - *(catalog)* Preserve RDF-listed Gutenberg EPUB variants (#346)
+- *(catalog)* Recover downloads with the official EPUB mirror (#349)
+- *(catalog)* Align acquisition actions beneath the cover (#350)
+- *(catalog)* Fill detail pane and name donation actions (#353)
 
 ### 🚜 Refactor
 
