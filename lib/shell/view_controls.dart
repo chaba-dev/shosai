@@ -35,7 +35,7 @@ class ShellCount extends StatelessWidget {
 /// page. Accent text with no fill or padding, underlined on hover, with the
 /// shared focus ring and a 44 px minimum target that grows with the label.
 /// Actions that change something stay a [ShadButton].
-class ShellLink extends StatelessWidget {
+class ShellLink extends StatefulWidget {
   const ShellLink({
     super.key,
     required this.label,
@@ -52,16 +52,37 @@ class ShellLink extends StatelessWidget {
   final TextStyle? style;
 
   @override
+  State<ShellLink> createState() => _ShellLinkState();
+}
+
+class _ShellLinkState extends State<ShellLink> {
+  final _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final accent = ShellPalette.of(context).accent;
-    // One link node for assistive technology instead of Shad's button; the
-    // button below still owns focus and keyboard activation.
-    return Semantics(
-      container: true,
-      link: true,
-      label: label,
-      onTap: onPressed,
-      excludeSemantics: true,
+    // One link node for assistive technology instead of Shad's button. The
+    // button below owns keyboard focus and activation; the node reflects
+    // that same focus node, so assistive technology sees and moves it.
+    return ListenableBuilder(
+      listenable: _focus,
+      builder: (context, child) => Semantics(
+        container: true,
+        link: true,
+        label: widget.label,
+        focusable: _focus.canRequestFocus,
+        focused: _focus.hasFocus,
+        onFocus: _focus.requestFocus,
+        onTap: widget.onPressed,
+        excludeSemantics: true,
+        child: child,
+      ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           minWidth: ShosaiTokens.sizeTouchTarget,
@@ -71,18 +92,22 @@ class ShellLink extends StatelessWidget {
           ),
         ),
         child: ShadButton.link(
+          focusNode: _focus,
           height: 0,
           padding: EdgeInsets.zero,
           foregroundColor: accent,
           hoverForegroundColor: accent,
           pressedForegroundColor: accent,
           hoverTextDecoration: TextDecoration.underline,
-          onPressed: onPressed,
-          trailing: trailing == null
+          onPressed: widget.onPressed,
+          trailing: widget.trailing == null
               ? null
-              : Icon(trailing, size: 18, color: accent),
+              : Icon(widget.trailing, size: 18, color: accent),
           child: Flexible(
-            child: Text(label, style: style ?? shellInterfaceStyle(16, 24)),
+            child: Text(
+              widget.label,
+              style: widget.style ?? shellInterfaceStyle(16, 24),
+            ),
           ),
         ),
       ),

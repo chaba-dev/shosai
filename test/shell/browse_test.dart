@@ -790,6 +790,27 @@ void main() {
     expect(link.flagsCollection.isLink, isTrue);
     expect(link.flagsCollection.isButton, isFalse);
     expect(link.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+    expect(link.flagsCollection.isFocused, Tristate.isFalse);
+    // The link node follows keyboard focus onto and away from the link.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(
+      tester
+          .getSemantics(find.byType(ShellLink).first)
+          .flagsCollection
+          .isFocused,
+      Tristate.isTrue,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(
+      tester
+          .getSemantics(find.byType(ShellLink).first)
+          .flagsCollection
+          .isFocused,
+      Tristate.isFalse,
+    );
+    expect(link.getSemanticsData().hasAction(SemanticsAction.focus), isTrue);
     semantics.dispose();
     await tester.pumpWidget(const SizedBox());
   });
