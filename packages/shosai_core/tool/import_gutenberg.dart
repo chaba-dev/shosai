@@ -40,9 +40,9 @@ Future<void> main(List<String> args) async {
       rdf: File(args[1]),
     );
     stdout.writeln(
-      'Imported ${result.works} works and ${result.editions} '
-      'RDF-listed EPUB editions; skipped ${result.skipped} non-text records '
-      'or records without a listed EPUB.',
+      'Imported ${result.works} works and ${result.editions} EPUB editions, '
+      'listed in the RDF or inferred for new releases; skipped '
+      '${result.skipped} non-text records or records without an EPUB.',
     );
   } on Exception catch (error) {
     stderr.writeln('Gutenberg import failed: $error');
@@ -129,40 +129,48 @@ Future<void> _importRdf(Database db, File input) async {
   final insertAgent = db.prepare(
     'INSERT INTO listed_agents VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
   );
+  final _RdfSink sink = (
+    epub: insert.execute,
+    detail: insertDetails.execute,
+    agent: insertAgent.execute,
+  );
   void write(_RdfRows rows) {
-    for (final row in rows.epubs) {
-      insert.execute(row);
-    }
-    for (final row in rows.details) {
-      insertDetails.execute(row);
-    }
-    for (final row in rows.agents) {
-      insertAgent.execute(row);
-    }
+    rows.epubs.forEach(sink.epub);
+    rows.details.forEach(sink.detail);
+    rows.agents.forEach(sink.agent);
   }
 
   db.execute('BEGIN');
-  final pending = Queue<Future<_RdfRows>>();
   try {
     if (input.path.endsWith('.tar.bz2')) {
       // Parse batches of members on other isolates, and insert their rows in
       // archive order so the tables fill exactly as a serial pass would.
+      // Results are captured when queued: a batch that fails before its turn
+      // must fail the import through this loop, not as an unhandled error.
+      final pending = Queue<Future<Result<_RdfRows>>>();
       var batch = <Uint8List>[];
+      var batchBytes = 0;
+      void queue() {
+        pending.add(Result.capture(_parseRdfInIsolate(batch)));
+        batch = [];
+        batchBytes = 0;
+      }
+
       await for (final member in _readRdfArchive(input)) {
         batch.add(member);
-        if (batch.length < 64) continue;
-        pending.add(_parseRdfInIsolate(batch));
-        batch = [];
+        batchBytes += member.length;
+        if (batch.length < 64 && batchBytes < _maxBatchBytes) continue;
+        queue();
         if (pending.length > Platform.numberOfProcessors) {
-          write(await pending.removeFirst());
+          write(await Result.release(pending.removeFirst()));
         }
       }
-      if (batch.isNotEmpty) pending.add(_parseRdfInIsolate(batch));
+      if (batch.isNotEmpty) queue();
       while (pending.isNotEmpty) {
-        write(await pending.removeFirst());
+        write(await Result.release(pending.removeFirst()));
       }
     } else {
-      write(await _parseRdf([input.openRead()]));
+      await _parseRdf([input.openRead()], sink);
     }
     if (db.select('SELECT 1 FROM listed_epubs LIMIT 1').isEmpty) {
       throw const FormatException('No EPUB files listed in Gutenberg RDF');
@@ -172,30 +180,47 @@ Future<void> _importRdf(Database db, File input) async {
     db.execute('ROLLBACK');
     rethrow;
   } finally {
-    for (final parse in pending) {
-      parse.ignore();
-    }
     insert.close();
     insertDetails.close();
     insertAgent.close();
   }
 }
 
-/// Rows that RDF documents contribute to the temporary tables, in the order
-/// the documents and their elements list them.
+/// Receives the rows RDF documents contribute to the temporary tables, in the
+/// order the documents and their elements list them.
+typedef _RdfSink = ({
+  void Function(List<Object?>) epub,
+  void Function(List<Object?>) detail,
+  void Function(List<Object?>) agent,
+});
+
 typedef _RdfRows = ({
   List<List<Object?>> epubs,
   List<List<Object?>> details,
   List<List<Object?>> agents,
 });
 
-Future<_RdfRows> _parseRdfInIsolate(List<Uint8List> members) =>
-    Isolate.run(() => _parseRdf([for (final m in members) Stream.value(m)]));
+/// Batches flush at 64 members or this many bytes, whichever comes first.
+const _maxBatchBytes = 4 << 20;
 
-Future<_RdfRows> _parseRdf(Iterable<Stream<List<int>>> documents) async {
-  final epubs = <List<Object?>>[];
-  final details = <List<Object?>>[];
-  final agents = <List<Object?>>[];
+/// Gutenberg's RDF documents are tens of kilobytes; a larger member is not one.
+const _maxRdfMemberBytes = 16 << 20;
+
+Future<_RdfRows> _parseRdfInIsolate(List<Uint8List> members) => Isolate.run(
+  () async {
+    final _RdfRows rows = (epubs: [], details: [], agents: []);
+    await _parseRdf(
+      [for (final member in members) Stream.value(member)],
+      (epub: rows.epubs.add, detail: rows.details.add, agent: rows.agents.add),
+    );
+    return rows;
+  },
+);
+
+Future<void> _parseRdf(
+  Iterable<Stream<List<int>>> documents,
+  _RdfSink sink,
+) async {
   // Validate each complete member, retaining only one ebook subtree at a time.
   final nodes = Stream.fromIterable(documents).asyncExpand(
     (bytes) => bytes
@@ -274,7 +299,7 @@ Future<_RdfRows> _parseRdf(Iterable<Stream<List<int>>> documents) async {
           .map((score) => double.parse(score).round())
           .firstOrNull;
       if (summary.isNotEmpty || ease != null) {
-        details.add([id, summary.isEmpty ? null : summary, ease]);
+        sink.detail([id, summary.isEmpty ? null : summary, ease]);
       }
       for (final agent in ebook.findAllElements(
         'agent',
@@ -292,7 +317,7 @@ Future<_RdfRows> _parseRdf(Iterable<Stream<List<int>>> documents) async {
                   .trim() ??
               '',
         );
-        agents.add([id, name, year('birthdate'), year('deathdate')]);
+        sink.agent([id, name, year('birthdate'), year('deathdate')]);
       }
       final rights = {
         for (final statement in ebook.findElements(
@@ -365,7 +390,7 @@ Future<_RdfRows> _parseRdf(Iterable<Stream<List<int>>> documents) async {
         if (extent != null && (size == null || size <= 0)) {
           throw FormatException('Invalid RDF EPUB size: $extent');
         }
-        epubs.add([
+        sink.epub([
           id,
           variant,
           label,
@@ -389,7 +414,7 @@ Future<_RdfRows> _parseRdf(Iterable<Stream<List<int>>> documents) async {
             (url) =>
                 url == '$uploads$id-0.txt' || url == '$uploads$id-h/$id-h.htm',
           )) {
-        epubs.add([
+        sink.epub([
           id,
           'images',
           'EPUB3 with images',
@@ -398,7 +423,7 @@ Future<_RdfRows> _parseRdf(Iterable<Stream<List<int>>> documents) async {
           null,
           rightsLine,
         ]);
-        epubs.add([
+        sink.epub([
           id,
           'noimages',
           'EPUB2 without images',
@@ -410,7 +435,6 @@ Future<_RdfRows> _parseRdf(Iterable<Stream<List<int>>> documents) async {
       }
     }
   }
-  return (epubs: epubs, details: details, agents: agents);
 }
 
 Stream<Uint8List> _readRdfArchive(File input) async* {
@@ -431,32 +455,55 @@ Stream<Uint8List> _readRdfArchive(File input) async* {
     return bytes;
   }
 
+  Future<void> skip(int length) async {
+    while (length > 0) {
+      final chunk = length < 65536 ? length : 65536;
+      await read(chunk);
+      length -= chunk;
+    }
+  }
+
   try {
-    String? longName;
+    // A GNU long name or POSIX extended header describes the next member.
+    String? path;
+    int? size;
     while (true) {
       final header = await read(512);
-      if (header.every((byte) => byte == 0)) break;
+      if (header.every((byte) => byte == 0)) {
+        if ((await read(512)).any((byte) => byte != 0)) {
+          throw const FormatException('Invalid end of RDF archive');
+        }
+        break;
+      }
       var sum = 0;
       for (var i = 0; i < 512; i++) {
         sum += i >= 148 && i < 156 ? 0x20 : header[i];
       }
-      final size = _octal(header, 124, 12);
-      if (size == null || _octal(header, 148, 8) != sum) {
+      final headerSize = _octal(header, 124, 12);
+      if (headerSize == null || _octal(header, 148, 8) != sum) {
         throw const FormatException('Invalid RDF archive header');
       }
-      final data = await read((size + 511) ~/ 512 * 512);
-      final body = Uint8List.sublistView(data, 0, size);
       final type = header[156];
-      if (type == 0x4c) {
-        // GNU long name for the next member.
-        longName = utf8.decode(body).split('\u0000').first;
-        continue;
-      }
-      if (type == 0x78) {
-        // POSIX extended header: only its path changes how we read the next member.
-        longName = RegExp(
-          r'(?:^|\n)\d+ path=([^\n]*)\n',
-        ).firstMatch(utf8.decode(body))?[1];
+      final length = type == 0x4c || type == 0x78
+          ? headerSize
+          : size ?? headerSize;
+      final padded = (length + 511) ~/ 512 * 512;
+      if (type == 0x4c || type == 0x78) {
+        if (length > _maxRdfMemberBytes) {
+          throw const FormatException('RDF archive header too large');
+        }
+        final body = Uint8List.sublistView(await read(padded), 0, length);
+        if (type == 0x4c) {
+          path = utf8.decode(body).split('\u0000').first;
+        } else {
+          final records = _paxRecords(body);
+          path = records['path'] ?? path;
+          if (records['size'] case final value?) {
+            size = RegExp(r'^[0-9]+$').hasMatch(value)
+                ? int.parse(value)
+                : throw const FormatException('Invalid RDF archive size');
+          }
+        }
         continue;
       }
       String field(int start, int length) => utf8
@@ -467,12 +514,21 @@ Stream<Uint8List> _readRdfArchive(File input) async* {
           ? field(345, 155)
           : '';
       final name =
-          longName ??
-          (prefix.isEmpty ? field(0, 100) : '$prefix/${field(0, 100)}');
-      longName = null;
-      if ((type == 0x30 || type == 0) && name.endsWith('.rdf')) yield body;
+          path ?? (prefix.isEmpty ? field(0, 100) : '$prefix/${field(0, 100)}');
+      path = null;
+      size = null;
+      // Regular and contiguous files; links, directories and others are skipped.
+      if ((type == 0x30 || type == 0 || type == 0x37) &&
+          name.endsWith('.rdf')) {
+        if (length > _maxRdfMemberBytes) {
+          throw FormatException('RDF archive member too large: $name');
+        }
+        yield Uint8List.sublistView(await read(padded), 0, length);
+      } else {
+        await skip(padded);
+      }
     }
-    // Two zero blocks end the archive; the record padding after them is zeros.
+    // The record padding after the two end blocks is zeros.
     while (true) {
       final rest = await reader.readBytes(65536);
       if (rest.isEmpty) break;
@@ -491,6 +547,37 @@ Stream<Uint8List> _readRdfArchive(File input) async* {
     await done;
     await errors;
   }
+}
+
+/// POSIX extended header records: "LENGTH key=value\n", where LENGTH counts
+/// the whole record in bytes, so values may contain newlines.
+Map<String, String> _paxRecords(Uint8List body) {
+  final records = <String, String>{};
+  var start = 0;
+  while (start < body.length) {
+    final space = body.indexOf(0x20, start);
+    final digits = space < 0
+        ? null
+        : ascii.decode(body.sublist(start, space), allowInvalid: true);
+    final length = digits != null && RegExp(r'^[1-9][0-9]*$').hasMatch(digits)
+        ? int.parse(digits)
+        : null;
+    final end = length == null ? -1 : start + length;
+    if (length == null ||
+        end <= space + 1 ||
+        end > body.length ||
+        body[end - 1] != 0x0a) {
+      throw const FormatException('Invalid RDF archive extended header');
+    }
+    final record = utf8.decode(body.sublist(space + 1, end - 1));
+    final equals = record.indexOf('=');
+    if (equals <= 0) {
+      throw const FormatException('Invalid RDF archive extended header');
+    }
+    records[record.substring(0, equals)] = record.substring(equals + 1);
+    start = end;
+  }
+  return records;
 }
 
 int? _octal(Uint8List bytes, int start, int length) {

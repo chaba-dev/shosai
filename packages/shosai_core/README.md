@@ -21,9 +21,15 @@ describes publication. Import with `dart run tool/import_gutenberg.dart
 DOWNLOADED_CSV_OR_CSV_GZ DOWNLOADED_RDF_TAR_BZ2 NEW.sqlite` before exporting;
 website automation must pin a revision supporting this three-path interface.
 A plain `.rdf` file is also accepted for the second input. The importer joins
-CSV search metadata with RDF-listed EPUB URLs, sizes and rights. It omits works
-without a listed EPUB, preserves each listed variant and prefers EPUB3 when
-available. Labels distinguish EPUB3 from the older EPUB2 variants. Missing sizes
+CSV search metadata with RDF-listed EPUB URLs, sizes and rights. Until Gutenberg
+adds the formats it generates, a new release's RDF lists only its uploaded
+`N-0.txt` or `N-h/N-h.htm`, though Gutenberg already serves its EPUBs. For a
+record that lists nothing but uploads under `/files/N/` including one of those,
+the importer infers the standard EPUB3-with-images and EPUB2-without-images
+editions with unknown sizes. This is an inference from file names, not proof
+that Gutenberg generated them. It omits other works without a listed EPUB,
+such as TeX/PDF-only works, preserves each listed variant and prefers EPUB3
+when available. Labels distinguish EPUB3 from the older EPUB2 variants. Missing sizes
 stay unknown; missing rights retain the instruction to check Gutenberg.
 
 The same RDF pass supplies descriptive details. A work's `marc520` summary and
