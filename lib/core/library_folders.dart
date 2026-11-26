@@ -7,8 +7,10 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 
@@ -235,6 +237,304 @@ final class LibraryFolders {
     await _load();
     return _grants;
   });
+
+  /// The first connected location is the default until the reader chooses.
+  /// An explicit private-library choice is distinct from having no preference.
+  Future<
+    ({
+      List<({LibraryConnection connection, int generation})> locations,
+      String? selected,
+    })
+  >
+  saveOptions() => _serial(() async {
+    await _load();
+    final saved = await _preferences.get('device.library.save-location');
+    final locations = _scanned;
+    return (
+      locations:
+          List<({LibraryConnection connection, int generation})>.unmodifiable([
+            for (final connection in locations)
+              (
+                connection: connection,
+                generation: _generations[connection.id]!,
+              ),
+          ]),
+      selected: saved == 'private'
+          ? null
+          : locations.where((g) => g.id == saved).firstOrNull?.id ??
+                locations.firstOrNull?.id,
+    );
+  });
+
+  Future<void> selectSaveLocation(String? id) => _serial(() async {
+    await _load();
+    if (id != null && !_scanned.any((g) => g.id == id)) {
+      throw const LocationException(LocationFailure.revoked);
+    }
+    await _preferences.set('device.library.save-location', id ?? 'private');
+  });
+
+  /// The downloaded bytes are verified before any external publication. A
+  /// duplicate is an idempotent Add, not an instruction to open the reader.
+  /// Grant changes and other admissions cannot interleave with publication.
+  Future<({Book book, bool existing})> saveDownloadedBook(
+    String path, {
+    required String? locationId,
+    required String source,
+    required String title,
+    required String? author,
+    required BookFormat format,
+    required ({int generation, String? directory})? destination,
+    CancellationToken? cancellation,
+  }) => _serial(() async {
+    await _load(cancellation: cancellation);
+    cancellation.throwIfCancelled();
+    if (locationId != null &&
+        (destination == null ||
+            _generations[locationId] != destination.generation ||
+            _grant(locationId).directory != destination.directory)) {
+      throw const CatalogDestinationChanged();
+    }
+    final fingerprint = await fingerprintFile(path, cancellation: cancellation);
+    final known = await _library.withContent(fingerprint.hash);
+    if (known != null && (known.located || await File(known.path).exists())) {
+      return (book: known, existing: true);
+    }
+    if (locationId == null) {
+      final item = await _library.importFile(
+        path,
+        managed: true,
+        cancellation: cancellation,
+      );
+      if (item.book == null) {
+        throw CoreException.malformed(
+          item.error ?? 'The book could not be added.',
+        );
+      }
+      return (book: item.book!, existing: item.duplicate);
+    }
+    final grant = _grant(locationId);
+    if (!_scans(grant)) {
+      throw const CoreException(
+        CoreErrorKind.unsupported,
+        'Folders are not book sources on this device.',
+      );
+    }
+    final adapter = await _provider(grant.provider).open(grant);
+    if (adapter is! LibrarySaveLocation) {
+      throw const CoreException(
+        CoreErrorKind.unsupported,
+        'This location cannot safely save new books.',
+      );
+    }
+    final metadata = await _library.inspectFile(path, format, cancellation);
+    if (!await fingerprint.unchangedSince(path)) {
+      throw const CoreException.conflict('The downloaded file changed.');
+    }
+    final folder = await _saveFolder(
+      adapter,
+      grant.directory,
+      source,
+      cancellation,
+    );
+    final plain = bookFileName(title, author, format.name);
+    final extension = '.${format.name}';
+    final stem = bookNameKey(
+      plain.substring(0, plain.length - extension.length),
+    );
+    // A failed local admission may have already published a numbered name.
+    // Adopt identical bytes only in this generated series, not arbitrary files.
+    final names = RegExp(
+      '^${RegExp.escape(stem)}'
+      r'(?: \((?:[2-9]|[1-9][0-9]+)\))?'
+      '${RegExp.escape(extension)}'
+      r'$',
+    );
+    List<LocationEntry> matches = [];
+    for (var attempt = 0; attempt < 8; attempt++) {
+      final entries = await _saveEntries(adapter, folder.key, cancellation);
+      matches = [];
+      for (final entry in entries.where(
+        (e) =>
+            e.readable && !e.isDirectory && names.hasMatch(bookNameKey(e.name)),
+      )) {
+        final current = await adapter.stat(
+          entry.key,
+          cancellation: cancellation,
+        );
+        if (current.isDirectory || current.size != fingerprint.size) continue;
+        bool same = current.sha256 == fingerprint.hash;
+        if (!same && current.dropboxContentHash != null) {
+          final parts = <int>[];
+          final input = await File(path).open();
+          try {
+            while (true) {
+              cancellation.throwIfCancelled();
+              final block = await input.read(4 * 1024 * 1024);
+              if (block.isEmpty) break;
+              parts.addAll(sha256.convert(block).bytes);
+            }
+          } finally {
+            await input.close();
+          }
+          same = sha256.convert(parts).toString() == current.dropboxContentHash;
+        }
+        if (!same && grant.provider == FolderConnectionProvider.providerId) {
+          final digest = await sha256
+              .bind(
+                adapter.read(
+                  current.key,
+                  end: fingerprint.size + 1,
+                  cancellation: cancellation,
+                ),
+              )
+              .first;
+          same = digest.toString() == fingerprint.hash;
+        }
+        if (!same) continue;
+        final after = await adapter.stat(
+          current.key,
+          cancellation: cancellation,
+        );
+        if (after.size == current.size && after.revision == current.revision) {
+          matches.add(after);
+        }
+      }
+      if (matches.isNotEmpty) break;
+      final taken = entries.map((e) => bookNameKey(e.name)).toSet();
+      var number = 1;
+      while (taken.contains(
+        bookNameKey(bookFileName(title, author, format.name, number: number)),
+      )) {
+        if (++number > maxDiscoveryEntries + 1) {
+          throw const CoreException.limitExceeded(
+            'Too many destination names.',
+          );
+        }
+      }
+      cancellation.throwIfCancelled();
+      try {
+        matches = [
+          await adapter.createFile(
+            bookFileName(title, author, format.name, number: number),
+            File(path).openRead(),
+            directory: folder.key,
+            cancellation: cancellation,
+          ),
+        ];
+        break;
+      } on CoreException catch (error) {
+        if (error.kind != CoreErrorKind.conflict) rethrow;
+        // Re-list and recheck identical bytes: a race must not blindly number
+        // a file another device just saved with the same content.
+      }
+    }
+    if (matches.isEmpty) {
+      throw const CoreException.conflict('The destination keeps changing.');
+    }
+    // Publication/adoption is the commit boundary. Do not cancel between
+    // admitting these bytes and associating their durable provider locations.
+    final item = await _locations.importPublished(
+      path,
+      format,
+      fingerprint,
+      metadata,
+      locationId,
+      _generations[locationId]!,
+      matches,
+    );
+    final book = item.book;
+    await _cache.withFile(book, () => File(path).openRead(), (_) async {});
+    _catalog = List.unmodifiable(
+      _catalog.where(
+        (file) =>
+            file.locationId != locationId ||
+            !matches.any((e) => e.key == file.entry.key),
+      ),
+    );
+    return (book: (await _library.get(book.id))!, existing: item.existing);
+  });
+
+  Future<List<LocationEntry>> _saveEntries(
+    LibraryLocation location,
+    String? directory,
+    CancellationToken? cancellation,
+  ) async {
+    final entries = <LocationEntry>[];
+    final cursors = <String?>{};
+    String? cursor;
+    do {
+      cancellation.throwIfCancelled();
+      if (!cursors.add(cursor)) {
+        throw const CoreException.malformed('Repeated destination page.');
+      }
+      final page = location is LibrarySaveInventory
+          ? await (location as LibrarySaveInventory).listForSave(
+              directory: directory,
+              cursor: cursor,
+              limit: 500,
+              cancellation: cancellation,
+            )
+          : await location.list(
+              directory: directory,
+              cursor: cursor,
+              limit: 500,
+              cancellation: cancellation,
+            );
+      entries.addAll(page.entries);
+      if (entries.length > maxDiscoveryEntries) {
+        throw const CoreException.limitExceeded(
+          'Too many destination entries.',
+        );
+      }
+      cursor = page.nextCursor;
+    } while (cursor != null);
+    return entries;
+  }
+
+  Future<LocationEntry> _saveFolder(
+    LibrarySaveLocation location,
+    String? parent,
+    String source,
+    CancellationToken? cancellation,
+  ) async {
+    for (var attempt = 0; attempt < 8; attempt++) {
+      final entries = await _saveEntries(location, parent, cancellation);
+      for (var number = 1; number <= maxDiscoveryEntries + 1; number++) {
+        final name = number == 1 ? source : '$source ($number)';
+        final matches = entries
+            .where((e) => bookNameKey(e.name) == bookNameKey(name))
+            .toList();
+        final folders =
+            matches.where((e) => e.readable && e.isDirectory).toList()
+              ..sort((a, b) {
+                final left = utf8.encode(a.name), right = utf8.encode(b.name);
+                for (var i = 0; i < min(left.length, right.length); i++) {
+                  if (left[i] != right[i]) return left[i].compareTo(right[i]);
+                }
+                final order = left.length.compareTo(right.length);
+                if (order != 0) return order;
+                final created = (a.createdAt ?? DateTime.utc(1970)).compareTo(
+                  b.createdAt ?? DateTime.utc(1970),
+                );
+                return created != 0 ? created : a.key.compareTo(b.key);
+              });
+        if (folders.isNotEmpty) return folders.first;
+        if (matches.isNotEmpty) continue;
+        try {
+          return await location.createDirectory(
+            name,
+            directory: parent,
+            cancellation: cancellation,
+          );
+        } on CoreException catch (error) {
+          if (error.kind != CoreErrorKind.conflict) rethrow;
+          break; // A concurrent creator won; prefer its folder on re-list.
+        }
+      }
+    }
+    throw const CoreException.conflict('The source folder keeps changing.');
+  }
 
   ConnectionProvider _provider(String id) => _providers.firstWhere(
     (provider) => provider.id == id,

@@ -17,6 +17,7 @@ import 'package:shosai_core/shosai_core.dart'
         maxPreferenceTotalBytes;
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -191,6 +192,41 @@ void main() {
   }
 
   test(
+    'bridges share one lazy catalog separate from the personal store',
+    () async {
+      final second = ApplicationBridge(core);
+      expect(bridge, isA<CatalogHost>());
+      expect(second.catalog, same(bridge.catalog));
+      final book = await import(_epubFixture);
+      expect(await bridge.catalog.isInstalled, isFalse);
+      expect(await bridge.catalog.search(query: 'sample'), isEmpty);
+      expect(Directory('${directory.path}/catalog').existsSync(), isFalse);
+      bridge.dispose();
+      await bridge.drain();
+      // Closing a bridge doesn't own the catalog lifetime.
+      expect(await second.catalog.categories(), isEmpty);
+      expect(await second.catalog.book('gutenberg:1342'), isNull);
+      expect((await core.library.get(book.bookId))!.title, book.title);
+      second.dispose();
+      await second.drain();
+    },
+  );
+
+  test('recent catalog searches persist across application restarts', () async {
+    expect(await bridge.recentCatalogSearches(), isEmpty);
+    await bridge.saveRecentCatalogSearches(['Pride', '夏目漱石']);
+    bridge.dispose();
+    await bridge.drain();
+    await core.close();
+    core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+    bridge = ApplicationBridge(core);
+    expect(await bridge.recentCatalogSearches(), ['Pride', '夏目漱石']);
+    expect((await core.library.page()).books, isEmpty);
+    bridge.dispose();
+    await bridge.drain();
+  });
+
+  test(
     'large source catalogs survive restart without preference-size limits',
     () async {
       final source = Directory('${directory.path}/source')..createSync();
@@ -210,6 +246,48 @@ void main() {
       expect(await core.folders.discover(), hasLength(600));
       await core.folders.remove('large');
       expect(await core.folders.discover(), isEmpty);
+    },
+  );
+
+  test(
+    'catalog save choices include folders and disambiguate equal display labels',
+    () async {
+      final target = Directory('${directory.path}/destinations')..createSync();
+      for (final (id, folder) in [
+        ('first', 'Personal'),
+        ('second', 'Shared'),
+        ('third', 'Shared'),
+        ('fourth', 'Shared (1)'),
+      ]) {
+        final account = Directory('${target.path}/$id')..createSync();
+        Directory('${account.path}/$folder').createSync();
+        await core.folders.add(
+          LibraryConnection(
+            id,
+            'My books',
+            'folder',
+            {'kind': 'path', 'grant': account.path},
+            directory: folder,
+            directoryLabel: folder,
+          ),
+        );
+      }
+      final options = await bridge.catalogSaveOptions();
+      expect(options.locations.map((g) => (id: g.id, label: g.label)), [
+        (id: 'first', label: 'My books — Personal'),
+        (id: 'second', label: 'My books — Shared (2)'),
+        (id: 'third', label: 'My books — Shared (3)'),
+        (id: 'fourth', label: 'My books — Shared (1)'),
+      ]);
+      expect(options.locations.map((g) => g.directory), [
+        'Personal',
+        'Shared',
+        'Shared',
+        'Shared (1)',
+      ]);
+      expect(options.locations.every((g) => g.generation > 0), true);
+      await bridge.selectCatalogSaveLocation('third');
+      expect((await bridge.catalogSaveOptions()).selected, 'third');
     },
   );
 

@@ -213,14 +213,16 @@ final class DriveTransport {
   }
 }
 
-final class GoogleDriveLocation implements LibraryLocation {
+final class GoogleDriveLocation
+    implements LibrarySaveLocation, LibrarySaveInventory {
   GoogleDriveLocation(this.id, this.transport);
 
   @override
   final String id;
   final DriveTransport transport;
   static const folderMime = 'application/vnd.google-apps.folder';
-  static const _fields = 'id,name,mimeType,size,version,trashed,ownedByMe';
+  static const _fields =
+      'id,name,mimeType,size,version,trashed,ownedByMe,sha256Checksum,createdTime';
 
   static Uri _uri(String path, [Map<String, String>? query]) =>
       Uri.https('www.googleapis.com', '/drive/v3/$path', query);
@@ -238,6 +240,9 @@ final class GoogleDriveLocation implements LibraryLocation {
     isDirectory: file['mimeType'] == folderMime,
     size: int.tryParse(file['size']?.toString() ?? ''),
     revision: file['version']?.toString(),
+    sha256: file['sha256Checksum'] as String?,
+    createdAt: DateTime.tryParse(file['createdTime'] as String? ?? ''),
+    readable: file['ownedByMe'] == true && _supported(file),
   );
 
   static bool _supported(Map<String, dynamic> file) =>
@@ -250,6 +255,33 @@ final class GoogleDriveLocation implements LibraryLocation {
     String? cursor,
     int limit = 100,
     CancellationToken? cancellation,
+  }) => _list(
+    directory: directory,
+    cursor: cursor,
+    limit: limit,
+    cancellation: cancellation,
+  );
+
+  @override
+  Future<LocationPage> listForSave({
+    String? directory,
+    String? cursor,
+    int limit = 100,
+    CancellationToken? cancellation,
+  }) => _list(
+    directory: directory,
+    cursor: cursor,
+    limit: limit,
+    cancellation: cancellation,
+    includeUnsupported: true,
+  );
+
+  Future<LocationPage> _list({
+    String? directory,
+    String? cursor,
+    required int limit,
+    CancellationToken? cancellation,
+    bool includeUnsupported = false,
   }) async {
     if (limit < 1 || limit > 1000 || (cursor?.length ?? 0) > 8192) {
       throw const CoreException.invalidRequest('Invalid Drive page.');
@@ -262,7 +294,8 @@ final class GoogleDriveLocation implements LibraryLocation {
     final result = await transport.json(
       'GET',
       _uri('files', {
-        'q': "'$parent' in parents and trashed = false and 'me' in owners",
+        'q':
+            "'$parent' in parents and trashed = false${includeUnsupported ? '' : " and 'me' in owners"}",
         'pageSize': '$limit',
         'fields': 'nextPageToken,incompleteSearch,files($_fields)',
         'spaces': 'drive',
@@ -280,7 +313,9 @@ final class GoogleDriveLocation implements LibraryLocation {
     }
     return LocationPage([
       for (final file in (result['files'] as List? ?? []).cast<Map>())
-        if (_supported(file.cast<String, dynamic>()))
+        if (includeUnsupported ||
+            (file['ownedByMe'] == true &&
+                _supported(file.cast<String, dynamic>())))
           _entry(file.cast<String, dynamic>()),
     ], nextCursor: result['nextPageToken'] as String?);
   }
@@ -386,6 +421,73 @@ final class GoogleDriveLocation implements LibraryLocation {
     Stream<List<int>> bytes, {
     String? directory,
     CancellationToken? cancellation,
+  }) => _write(name, bytes, directory: directory, cancellation: cancellation);
+
+  @override
+  Future<LocationEntry> createFile(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) => _write(
+    name,
+    bytes,
+    directory: directory,
+    cancellation: cancellation,
+    createOnly: true,
+  );
+
+  Future<String> _newId(CancellationToken? cancellation) async {
+    final result = await transport.json(
+      'GET',
+      _uri('files/generateIds', {
+        'count': '1',
+        'space': 'drive',
+        'type': 'files',
+      }),
+      cancellation: cancellation,
+    );
+    return _key((result['ids'] as List).single as String);
+  }
+
+  @override
+  Future<LocationEntry> createDirectory(
+    String name, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) async {
+    if (name.isEmpty ||
+        name.contains('/') ||
+        name.contains('\\') ||
+        name.contains('\u0000') ||
+        utf8.encode(name).length > 255) {
+      throw const CoreException.invalidRequest('Invalid Drive folder name.');
+    }
+    final id = await _newId(cancellation);
+    return _entry(
+      await transport.json(
+        'POST',
+        _uri('files', {'fields': _fields}),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: utf8.encode(
+          jsonEncode({
+            'id': id,
+            'name': name,
+            'mimeType': folderMime,
+            'parents': [_key(directory ?? 'root')],
+          }),
+        ),
+        cancellation: cancellation,
+      ),
+    );
+  }
+
+  Future<LocationEntry> _write(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+    bool createOnly = false,
   }) async {
     if (name.isEmpty ||
         name.contains('/') ||
@@ -399,16 +501,18 @@ final class GoogleDriveLocation implements LibraryLocation {
         !(await stat(directory, cancellation: cancellation)).isDirectory) {
       throw const CoreException.invalidRequest('Choose a Drive folder.');
     }
-    final existing = await transport.json(
-      'GET',
-      _uri('files', {
-        'q':
-            "'${_key(parent)}' in parents and trashed = false and 'me' in owners and name = '${name.replaceAll("'", "\\'")}'",
-        'fields': 'nextPageToken,files($_fields)',
-        'pageSize': '2',
-      }),
-      cancellation: cancellation,
-    );
+    final existing = createOnly
+        ? <String, dynamic>{'files': <Map>[]}
+        : await transport.json(
+            'GET',
+            _uri('files', {
+              'q':
+                  "'${_key(parent)}' in parents and trashed = false and 'me' in owners and name = '${name.replaceAll("'", "\\'")}'",
+              'fields': 'nextPageToken,files($_fields)',
+              'pageSize': '2',
+            }),
+            cancellation: cancellation,
+          );
     final matches = (existing['files'] as List).cast<Map>();
     if (matches.length > 1 || existing['nextPageToken'] != null) {
       throw const CoreException.invalidRequest(
@@ -416,6 +520,8 @@ final class GoogleDriveLocation implements LibraryLocation {
       );
     }
     final replacement = matches.firstOrNull;
+    // One ID is reused even when authorization renewal repeats initiation.
+    final newId = createOnly ? await _newId(cancellation) : null;
     if (replacement != null &&
         (!_supported(replacement.cast<String, dynamic>()) ||
             replacement['mimeType'] == folderMime)) {
@@ -438,6 +544,7 @@ final class GoogleDriveLocation implements LibraryLocation {
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
         body: utf8.encode(
           jsonEncode({
+            'id': ?newId,
             'name': name,
             if (replacement == null) 'parents': [_key(parent)],
           }),
@@ -506,6 +613,7 @@ final class GoogleDriveLocation implements LibraryLocation {
           );
         }
         Map<String, dynamic>? completed;
+        cancellation.throwIfCancelled();
         final result = await DriveTransport.boundedBytes(
           transport.request(
             'PUT',
@@ -517,7 +625,7 @@ final class GoogleDriveLocation implements LibraryLocation {
                   : 'bytes $offset-${total - 1}/${ended ? total : '*'}',
             },
             body: chunk,
-            cancellation: cancellation,
+            cancellation: createOnly && ended ? null : cancellation,
             response: (response) {
               if ((!ended && response.statusCode != 308) ||
                   (ended &&

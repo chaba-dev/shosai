@@ -4,6 +4,8 @@ library;
 
 import 'dart:convert';
 
+export 'src/catalog/catalog_client.dart';
+
 const catalogDatabaseVersion = 1;
 const catalogFormatVersion = 2;
 

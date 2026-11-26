@@ -920,7 +920,7 @@ void main() {
     ) async {
       final bridge = withHits(await _pump(tester, const Size(1440, 900)));
       await commandK(tester);
-      expect(palette, findsOneWidget);
+      expect(find.byType(ShellBrowsePage), findsOneWidget);
       expect(
         find.byKey(const ValueKey('shell-search-scope')),
         findsNothing,
@@ -928,7 +928,7 @@ void main() {
       );
 
       await tester.enterText(
-        find.byKey(const ValueKey('shell-search-field')),
+        find.byKey(const ValueKey('browse-search-field')),
         'lead',
       );
       await tester.pump(const Duration(milliseconds: 250));
@@ -939,12 +939,11 @@ void main() {
       expect(find.text('$_quiet · Page note'), findsOneWidget);
       expect(find.text(_atlas), findsWidgets);
       expect(find.text('· 1 match'), findsOneWidget);
-      // Notes come first, then each book's text.
+      // Personal matches precede the free-book section. Notes sit beside
+      // book matches on desktop, rather than forcing one below the other.
       expect(
-        tester.getRect(find.byKey(const ValueKey('shell-search-notes'))).top,
-        lessThan(
-          tester.getRect(find.byKey(const ValueKey('shell-search-book-4'))).top,
-        ),
+        tester.getRect(find.byKey(const ValueKey('shell-search-book-4'))).top,
+        lessThan(tester.getRect(find.text('Free books').last).top),
       );
 
       await tester.tap(find.byKey(const ValueKey('shell-search-text-4-0')));
@@ -988,11 +987,13 @@ void main() {
     testWidgets('the filter keeps to text or notes', (tester) async {
       final bridge = withHits(await _pump(tester, const Size(1440, 900)));
       await commandK(tester);
-      await tester.tap(find.text('Notes').last);
       await tester.enterText(
-        find.byKey(const ValueKey('shell-search-field')),
+        find.byKey(const ValueKey('browse-search-field')),
         'lead',
       );
+      // Search scopes appear once typing starts, before the debounce fires.
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Notes'));
       await tester.pump(const Duration(milliseconds: 250));
       await tester.pumpAndSettle();
       expect(bridge.libraryNoteSearches, hasLength(1));
@@ -1000,7 +1001,7 @@ void main() {
       expect(find.text('NOTES · 1'), findsOneWidget);
       expect(find.byKey(const ValueKey('shell-search-book-4')), findsNothing);
 
-      await tester.tap(find.text('Text').last);
+      await tester.tap(find.text('Your books').last);
       await tester.pumpAndSettle();
       expect(bridge.libraryTextSearches, hasLength(1));
       expect(find.text('NOTES · 1'), findsNothing);
@@ -1011,19 +1012,19 @@ void main() {
       await _pump(tester, const Size(1440, 900));
       await commandK(tester);
       await tester.enterText(
-        find.byKey(const ValueKey('shell-search-field')),
+        find.byKey(const ValueKey('browse-search-field')),
         'nowhere',
       );
       await tester.pump(const Duration(milliseconds: 250));
       await tester.pumpAndSettle();
-      expect(find.text('No matches for “nowhere”'), findsOneWidget);
+      expect(find.text('No matches for “nowhere”'), findsWidgets);
 
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.tap(find.text('Library').last);
       await tester.pumpAndSettle();
       expect(palette, findsNothing);
     });
 
-    testWidgets('the Search place and / open it, but / types in a field', (
+    testWidgets('the Search place and / open Browse, but / types in a field', (
       tester,
     ) async {
       await _pump(tester, const Size(1440, 900));
@@ -1036,15 +1037,15 @@ void main() {
             .last,
       );
       await tester.pumpAndSettle();
-      expect(palette, findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('shell-search-close')));
+      expect(find.byType(ShellBrowsePage), findsOneWidget);
+      await tester.tap(find.text('Library').last);
       await tester.pumpAndSettle();
       expect(palette, findsNothing);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.slash);
       await tester.pumpAndSettle();
-      expect(palette, findsOneWidget);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      expect(find.byType(ShellBrowsePage), findsOneWidget);
+      await tester.tap(find.text('Library').last);
       await tester.pumpAndSettle();
 
       await tester.tap(find.byType(ShadInput).first);
@@ -1078,7 +1079,7 @@ void main() {
       ];
       await commandK(tester);
       await tester.enterText(
-        find.byKey(const ValueKey('shell-search-field')),
+        find.byKey(const ValueKey('browse-search-field')),
         'STRASSE',
       );
       await tester.pump(const Duration(milliseconds: 250));
@@ -1232,7 +1233,7 @@ void main() {
       ];
       await commandK(tester);
       await tester.enterText(
-        find.byKey(const ValueKey('shell-search-field')),
+        find.byKey(const ValueKey('browse-search-field')),
         'lead',
       );
       await tester.pump(const Duration(milliseconds: 250));
@@ -1247,7 +1248,7 @@ void main() {
         300,
         scrollable: find
             .descendant(
-              of: find.byKey(const ValueKey('shell-search-results')),
+              of: find.byKey(const PageStorageKey('catalog-search-scroll')),
               matching: find.byType(Scrollable),
             )
             .first,
@@ -1312,16 +1313,19 @@ void main() {
       expect(bridge.savedReadingStates.last.offset, read.offset);
     });
 
-    testWidgets('a phone shows it full screen', (tester) async {
+    testWidgets('a phone keeps Browse beside its bottom navigation', (
+      tester,
+    ) async {
       await _pump(tester, const Size(390, 844));
       await commandK(tester);
       expect(
-        tester
-            .getSize(find.byKey(const ValueKey('shell-search-results')))
-            .width,
+        tester.getSize(find.byType(ShellBrowsePage)).width,
         greaterThan(350),
       );
-      expect(tester.getRect(palette).height, 844);
+      expect(
+        tester.getRect(find.byType(ShellBrowsePage)).height,
+        844 - shellBottomNavHeight,
+      );
     });
   });
 

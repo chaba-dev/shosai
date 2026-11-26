@@ -3,12 +3,15 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/catalog.dart';
+import 'package:shosai_flutter/core/catalog_downloads.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/documents.dart';
 import 'package:shosai_flutter/core/document_access.dart';
@@ -34,6 +37,10 @@ const libraryTextVersions = {
 final class ShosaiCore {
   ShosaiCore._(this.store, this.library, this.pdfEngine, String dataDirectory)
     : snapshots = DocumentSnapshots('$dataDirectory/snapshots'),
+      catalog = CatalogClient(
+        '$dataDirectory/catalog',
+        userAgent: catalogUserAgent,
+      ),
       fileCache = BookFileCache(store, '$dataDirectory/file-cache'),
       locations = LibraryLocations(store),
       readingState = ReadingState(store),
@@ -76,6 +83,11 @@ final class ShosaiCore {
   final Library library;
   final LibraryLocations locations;
   final BookFileCache fileCache;
+  late final CatalogDownloads downloads = CatalogDownloads(
+    catalog,
+    folders,
+    snapshots.newPath,
+  );
   late final LibraryFolders folders = LibraryFolders(
     Preferences(store),
     library,
@@ -108,6 +120,10 @@ final class ShosaiCore {
   final Annotations annotations;
   final LibrarySearch search;
 
+  /// Replaceable public metadata; no requests until Search asks for a refresh.
+  /// This is never written through the personal library store or sync.
+  final CatalogClient catalog;
+
   /// The private copies open PDFs are read from, shared by every bridge.
   final DocumentSnapshots snapshots;
 
@@ -115,6 +131,7 @@ final class ShosaiCore {
   /// bridge uses the core: [CoreOwner.close] does, after its bridges drain.
   Future<void> close() async {
     try {
+      await catalog.close();
       await folders.close();
       await snapshots.close();
     } finally {
@@ -1246,6 +1263,8 @@ final class ApplicationBridge
     implements
         FlutterBridge,
         RecordsHost,
+        CatalogHost,
+        CatalogAcquisitionHost,
         LibraryFoldersHost,
         LibraryEditionsHost,
         DocumentAccessHost {
@@ -1259,6 +1278,98 @@ final class ApplicationBridge
 
   @override
   final CoreRecords records;
+
+  @override
+  CatalogClient get catalog => records._core.catalog;
+
+  @override
+  Future<List<String>> recentCatalogSearches() => records._guard(() async {
+    if (records._closed) throw const CoreException.cancelled();
+    final value = await Preferences(
+      records._core.store,
+    ).get('search.catalog.recent');
+    if (value == null) return const [];
+    final decoded = jsonDecode(value) as List<dynamic>;
+    return List<String>.unmodifiable(decoded.cast<String>());
+  });
+
+  @override
+  Future<void> saveRecentCatalogSearches(List<String> queries) =>
+      records._guard(() async {
+        if (records._closed) throw const CoreException.cancelled();
+        await Preferences(
+          records._core.store,
+        ).set('search.catalog.recent', jsonEncode(queries));
+      });
+
+  @override
+  Future<CatalogSaveOptions> catalogSaveOptions() => records._guard(() async {
+    if (records._closed) throw const CoreException.cancelled();
+    final options = await folders.saveOptions();
+    final labels = [
+      for (final (connection: connection, generation: _) in options.locations)
+        [
+          connection.label,
+          connection.directoryLabel,
+        ].whereType<String>().where((label) => label.isNotEmpty).join(' — '),
+    ];
+    final reserved = labels.toSet();
+    final uniqueLabels = <String>[];
+    for (final label in labels) {
+      if (labels.where((other) => other == label).length == 1) {
+        uniqueLabels.add(label);
+      } else {
+        var number = 1;
+        while (!reserved.add('$label ($number)')) {
+          number++;
+        }
+        uniqueLabels.add('$label ($number)');
+      }
+    }
+    return (
+      locations: [
+        for (var i = 0; i < options.locations.length; i++)
+          (
+            id: options.locations[i].connection.id,
+            label: uniqueLabels[i],
+            generation: options.locations[i].generation,
+            directory: options.locations[i].connection.directory,
+          ),
+      ],
+      selected: options.selected,
+    );
+  });
+
+  @override
+  Future<void> selectCatalogSaveLocation(String? id) =>
+      records._guard(() async {
+        if (records._closed) throw const CoreException.cancelled();
+        await folders.selectSaveLocation(id);
+      });
+
+  @override
+  Future<CatalogAddedBook> addCatalogBook({
+    required String bookId,
+    required String sourceId,
+    required String editionId,
+    required String? locationId,
+    required ({int generation, String? directory})? destination,
+    required BigInt cancellationId,
+    void Function(int received, int? total)? progress,
+  }) => records._guard(() async {
+    final token = records._token(cancellationId);
+    token.throwIfCancelled();
+    final result = await records._core.downloads.add(
+      bookId: bookId,
+      sourceId: sourceId,
+      editionId: editionId,
+      locationId: locationId,
+      destination: destination,
+      cancellation: token,
+      progress: progress,
+    );
+    return (book: _libraryBook(result.book), existing: result.existing);
+  });
 
   @override
   Future<FlutterBookProtection> bookProtection({

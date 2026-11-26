@@ -23,6 +23,7 @@ enum ShellSearchFilter { everything, text, notes }
 class ShellSearchController extends ChangeNotifier {
   ShellSearchController({
     required FlutterBridge bridge,
+    this.includeLibraryTitles = false,
     this.debounce = const Duration(
       milliseconds: ShosaiTokens.layoutLibrarySearchDebounceMs,
     ),
@@ -31,6 +32,7 @@ class ShellSearchController extends ChangeNotifier {
 
   final FlutterBridge _bridge;
   final ShosaiRecords _records;
+  final bool includeLibraryTitles;
 
   /// How long typing must pause before a query is searched.
   final Duration debounce;
@@ -74,11 +76,24 @@ class ShellSearchController extends ChangeNotifier {
         if (filter == _model.filter) return;
         _emit(_model.copyWith(filter: filter));
         _search(immediately: true);
+      case ShellSearchRefreshed():
+        _search(immediately: true);
       case _ShellSearchDue(:final revision):
         if (revision == _revision) _start(revision);
       case _ShellSearchNotesFound(:final revision, :final books):
         if (revision != _revision) return;
         _emit(_model.copyWith(notes: books, notesBusy: false));
+      case ShellSearchMoreTitlesRequested():
+        if (_model.titlesMore && !_model.titlesBusy) _titles(_revision);
+      case _ShellSearchTitlesFound(:final revision, :final books, :final more):
+        if (revision != _revision) return;
+        _emit(
+          _model.copyWith(
+            books: [..._model.books, ...books],
+            titlesBusy: false,
+            titlesMore: more,
+          ),
+        );
       case _ShellSearchTextFound(:final revision, :final book):
         if (revision != _revision) return;
         _emit(_model.copyWith(text: [..._model.text, book]));
@@ -91,6 +106,7 @@ class ShellSearchController extends ChangeNotifier {
           _model.copyWith(
             notesBusy: false,
             textBusy: false,
+            titlesBusy: false,
             error: () => error,
           ),
         );
@@ -110,8 +126,11 @@ class ShellSearchController extends ChangeNotifier {
       _model.copyWith(
         notes: const [],
         text: const [],
+        books: const [],
+        titlesMore: false,
         notesBusy: query.isNotEmpty,
         textBusy: query.isNotEmpty,
+        titlesBusy: query.isNotEmpty && includeLibraryTitles,
         error: () => null,
       ),
     );
@@ -131,6 +150,11 @@ class ShellSearchController extends ChangeNotifier {
         : null;
     final notes = model.filter != ShellSearchFilter.text;
     final text = model.filter != ShellSearchFilter.notes;
+    if (includeLibraryTitles && text) {
+      _titles(revision);
+    } else {
+      _emit(_model.copyWith(titlesBusy: false));
+    }
     if (!notes) _emit(_model.copyWith(notesBusy: false));
     if (!text) _emit(_model.copyWith(textBusy: false));
     if (notes) {
@@ -154,6 +178,21 @@ class ShellSearchController extends ChangeNotifier {
         dispatch(_ShellSearchTextFinished(revision));
       });
     }
+  }
+
+  void _titles(int revision) {
+    final query = _model.query.trim();
+    final offset = _model.books.length;
+    _emit(_model.copyWith(titlesBusy: true));
+    _effect(revision, (cancellation) async {
+      final page = await _records.libraryPage(
+        query: query,
+        limit: 30,
+        offset: offset,
+        cancellationId: cancellation,
+      );
+      dispatch(_ShellSearchTitlesFound(revision, page.books, page.hasMore));
+    });
   }
 
   void _effect(int revision, Future<void> Function(BigInt) body) {
@@ -222,8 +261,11 @@ final class ShellSearchModel {
     this.filter = ShellSearchFilter.everything,
     this.notes = const [],
     this.text = const [],
+    this.books = const [],
     this.notesBusy = false,
     this.textBusy = false,
+    this.titlesBusy = false,
+    this.titlesMore = false,
     this.error,
   });
 
@@ -239,11 +281,14 @@ final class ShellSearchModel {
 
   /// Books whose text holds the query, in the order they were searched.
   final List<FlutterBookTextHits> text;
+  final List<FlutterLibraryBook> books;
   final bool notesBusy;
   final bool textBusy;
+  final bool titlesBusy;
+  final bool titlesMore;
   final String? error;
 
-  bool get busy => notesBusy || textBusy;
+  bool get busy => notesBusy || textBusy || titlesBusy;
 
   ShellSearchModel copyWith({
     String? query,
@@ -252,8 +297,11 @@ final class ShellSearchModel {
     ShellSearchFilter? filter,
     List<FlutterBookNoteHits>? notes,
     List<FlutterBookTextHits>? text,
+    List<FlutterLibraryBook>? books,
     bool? notesBusy,
     bool? textBusy,
+    bool? titlesBusy,
+    bool? titlesMore,
     String? Function()? error,
   }) => ShellSearchModel(
     query: query ?? this.query,
@@ -262,14 +310,26 @@ final class ShellSearchModel {
     filter: filter ?? this.filter,
     notes: notes == null ? this.notes : List.unmodifiable(notes),
     text: text == null ? this.text : List.unmodifiable(text),
+    books: books == null ? this.books : List.unmodifiable(books),
     notesBusy: notesBusy ?? this.notesBusy,
     textBusy: textBusy ?? this.textBusy,
+    titlesBusy: titlesBusy ?? this.titlesBusy,
+    titlesMore: titlesMore ?? this.titlesMore,
     error: error == null ? this.error : error(),
   );
 }
 
 sealed class ShellSearchMessage {
   const ShellSearchMessage();
+}
+
+/// The personal library changed without changing the active search criteria.
+final class ShellSearchRefreshed extends ShellSearchMessage {
+  const ShellSearchRefreshed();
+}
+
+final class ShellSearchMoreTitlesRequested extends ShellSearchMessage {
+  const ShellSearchMoreTitlesRequested();
 }
 
 /// The palette opened; [book] is the book being read, if any, and [query]
@@ -310,6 +370,13 @@ final class _ShellSearchTextFound extends ShellSearchMessage {
   const _ShellSearchTextFound(this.revision, this.book);
   final int revision;
   final FlutterBookTextHits book;
+}
+
+final class _ShellSearchTitlesFound extends ShellSearchMessage {
+  const _ShellSearchTitlesFound(this.revision, this.books, this.more);
+  final int revision;
+  final List<FlutterLibraryBook> books;
+  final bool more;
 }
 
 final class _ShellSearchTextFinished extends ShellSearchMessage {

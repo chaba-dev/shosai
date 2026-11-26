@@ -6,6 +6,42 @@ import 'package:test/test.dart';
 import 'support/temp_store.dart';
 
 void main() {
+  test(
+    'create-only publication refuses a collision and leaves the original bytes',
+    () async {
+      final root = tempDataDirectory();
+      final location = await FolderLocation.open('local', root.path);
+      final folder = await location.createDirectory('Project Gutenberg');
+      await location.createFile(
+        'book.epub',
+        Stream.value([3, 7, 19]),
+        directory: folder.key,
+      );
+      await expectLater(
+        location.createFile(
+          'book.epub',
+          Stream.value([31, 47]),
+          directory: folder.key,
+        ),
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.conflict,
+          ),
+        ),
+      );
+      expect(
+        File('${root.path}/Project Gutenberg/book.epub').readAsBytesSync(),
+        [3, 7, 19],
+      );
+      expect(
+        Directory('${root.path}/Project Gutenberg').listSync(),
+        hasLength(1),
+      );
+    },
+  );
+
   test('pages metadata and reads only the requested range', () async {
     final root = tempDataDirectory();
     for (var i = 0; i < 5; i++) {

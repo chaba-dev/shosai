@@ -320,7 +320,7 @@ final class Library {
       if (outcome case Committed(:final book, :final duplicate)) {
         return (book, duplicate);
       }
-      metadata = await _inspect(path, format, cancellation);
+      metadata = await inspectFile(path, format, cancellation);
       if (!await fingerprint.unchangedSince(path)) {
         throw CoreException.conflict('The file changed during import: $path');
       }
@@ -349,7 +349,7 @@ final class Library {
       staged = true;
       final existing = await _records.bookWithContent(fingerprint.hash);
       final metadata = existing == null
-          ? await _inspect(stage, format, cancellation, titlePath: source)
+          ? await inspectFile(stage, format, cancellation, titlePath: source)
           : null;
       final destination = p.join(root, '${fingerprint.hash}.${format.name}');
       checkBookPath(destination);
@@ -446,7 +446,7 @@ final class Library {
         'The book changed before its metadata was read.',
       );
     }
-    final metadata = await _inspect(
+    final metadata = await inspectFile(
       path,
       book.format,
       cancellation,
@@ -461,7 +461,9 @@ final class Library {
     return (book: book, metadata: metadata);
   }
 
-  Future<BookMetadata> _inspect(
+  /// Validate a staged book before publishing it to the reader's storage,
+  /// without admitting a temporary path as a library book.
+  Future<BookMetadata> inspectFile(
     String path,
     BookFormat format,
     CancellationToken? cancellation, {

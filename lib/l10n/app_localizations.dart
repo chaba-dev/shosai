@@ -2490,6 +2490,234 @@ abstract class AppLocalizations {
   /// **'Open PDF'**
   String get pdfUnlockAction;
 
+  /// No description provided for @catalogSearchPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Search your books, notes and free books'**
+  String get catalogSearchPlaceholder;
+
+  /// No description provided for @catalogClearSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear search'**
+  String get catalogClearSearch;
+
+  /// No description provided for @catalogAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get catalogAll;
+
+  /// No description provided for @catalogYourBooks.
+  ///
+  /// In en, this message translates to:
+  /// **'Your books'**
+  String get catalogYourBooks;
+
+  /// No description provided for @catalogYourNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Your notes'**
+  String get catalogYourNotes;
+
+  /// No description provided for @catalogFreeBooks.
+  ///
+  /// In en, this message translates to:
+  /// **'Free books'**
+  String get catalogFreeBooks;
+
+  /// No description provided for @catalogAuthors.
+  ///
+  /// In en, this message translates to:
+  /// **'Authors'**
+  String get catalogAuthors;
+
+  /// No description provided for @catalogBrowse.
+  ///
+  /// In en, this message translates to:
+  /// **'Browse free books'**
+  String get catalogBrowse;
+
+  /// No description provided for @catalogRecentSearches.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent searches'**
+  String get catalogRecentSearches;
+
+  /// No description provided for @catalogFromSources.
+  ///
+  /// In en, this message translates to:
+  /// **'From {sources}'**
+  String catalogFromSources(String sources);
+
+  /// No description provided for @catalogLanguage.
+  ///
+  /// In en, this message translates to:
+  /// **'Language'**
+  String get catalogLanguage;
+
+  /// No description provided for @catalogCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get catalogCategory;
+
+  /// No description provided for @catalogSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Source'**
+  String get catalogSource;
+
+  /// No description provided for @catalogUpdating.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating the free-book catalog… You can keep searching.'**
+  String get catalogUpdating;
+
+  /// No description provided for @catalogOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'The catalog could not be updated. Any previously saved catalog remains available offline.'**
+  String get catalogOffline;
+
+  /// No description provided for @catalogReadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The catalog could not be read. Leave Search and try again.'**
+  String get catalogReadFailed;
+
+  /// No description provided for @catalogFirstDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to the internet to get the free-book catalog on this device.'**
+  String get catalogFirstDownload;
+
+  /// No description provided for @catalogShowMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Show more'**
+  String get catalogShowMore;
+
+  /// No description provided for @catalogBookCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 book} other{{count} books}}'**
+  String catalogBookCount(int count);
+
+  /// No description provided for @catalogChooseEdition.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose an edition'**
+  String get catalogChooseEdition;
+
+  /// No description provided for @catalogBytes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} bytes'**
+  String catalogBytes(int count);
+
+  /// No description provided for @catalogViewSource.
+  ///
+  /// In en, this message translates to:
+  /// **'View at source'**
+  String get catalogViewSource;
+
+  /// No description provided for @catalogSupportSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Support this source'**
+  String get catalogSupportSource;
+
+  /// No description provided for @catalogLinkFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The source could not be opened. Try again.'**
+  String get catalogLinkFailed;
+
+  /// No description provided for @catalogSaveTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Save to'**
+  String get catalogSaveTo;
+
+  /// No description provided for @catalogPrivateLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Private library on this device'**
+  String get catalogPrivateLibrary;
+
+  /// No description provided for @catalogAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to library'**
+  String get catalogAdd;
+
+  /// No description provided for @catalogAdding.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading and adding…'**
+  String get catalogAdding;
+
+  /// No description provided for @catalogCancelling.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelling…'**
+  String get catalogCancelling;
+
+  /// No description provided for @catalogCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Download cancelled.'**
+  String get catalogCancelled;
+
+  /// No description provided for @catalogAddFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The book could not be added. Check your connection and save location, then try again.'**
+  String get catalogAddFailed;
+
+  /// No description provided for @catalogLocationChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'The save location changed. Choose a save location again before adding.'**
+  String get catalogLocationChanged;
+
+  /// No description provided for @catalogLocationsFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Save locations could not be loaded.'**
+  String get catalogLocationsFailed;
+
+  /// No description provided for @catalogLocationsLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading save locations…'**
+  String get catalogLocationsLoading;
+
+  /// No description provided for @catalogAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'Added to your library'**
+  String get catalogAdded;
+
+  /// No description provided for @catalogAlreadyAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'Already in your library'**
+  String get catalogAlreadyAdded;
+
+  /// No description provided for @catalogRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Read'**
+  String get catalogRead;
+
+  /// No description provided for @catalogBackToSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to Search'**
+  String get catalogBackToSearch;
+
   /// No description provided for @editionLocations.
   ///
   /// In en, this message translates to:

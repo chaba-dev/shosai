@@ -1,0 +1,2314 @@
+{
+  "catalogSha256": "9eb5479d04008ac95489e7934fe3e5b0059717715fc83bdc7b836213e8de0857",
+  "composition": {
+    "width": 480,
+    "height": 272,
+    "background": "transparent"
+  },
+  "categories": [
+    {
+      "id": "gutenberg:Adventure",
+      "label": "Adventure",
+      "image": "gutenberg-adventure.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2701",
+          "title": "Moby Dick; Or, The Whale",
+          "gutenbergId": "2701",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2701/pg2701.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2701",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2701/pg2701.cover.medium.jpg",
+          "coverSha256": "39d44ea52dc4292242fe5d982535056bc7f27cc42b45cc7e9035c1710c7ae045",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2701/pg2701.rdf",
+          "rdfSha256": "c1ea689819d144ed4476f1a6671423aa747dc257d8ef6a9d1fba4e49ceb3716a",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:120",
+          "title": "Treasure Island",
+          "gutenbergId": "120",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/120/pg120.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/120",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/120/pg120.cover.medium.jpg",
+          "coverSha256": "2ba54a423c23ee7334119b42ca97075c40ca2bc2a86ae9c2923b5e9556b21819",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/120/pg120.rdf",
+          "rdfSha256": "b6703022f3ee9f5bfa3c85a3b25f077da3918ebc96cdd02d107e9befd8f9db6e",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "0ea8d31c9c32cd239fef764d0bfb95c7bc7cf8167b13bd6ee8176e485200e613"
+    },
+    {
+      "id": "gutenberg:American Literature",
+      "label": "American Literature",
+      "image": "gutenberg-american-literature.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:15",
+          "title": "Moby-Dick; or, The Whale",
+          "gutenbergId": "15",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/15/pg15.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/15",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/15/pg15.cover.medium.jpg",
+          "coverSha256": "2176ee63ae0247ff52a0a00515b2f009c6f1363a29f0c90788e0d4ac9b0dec16",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/15/pg15.rdf",
+          "rdfSha256": "8bcbfc36961c3ec8107f71b5cac0bea31fa411751fc8e2e40f6d773eb9db86bf",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:19",
+          "title": "The Song of Hiawatha",
+          "gutenbergId": "19",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/19/pg19.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/19",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/19/pg19.cover.medium.jpg",
+          "coverSha256": "140aa9b34ae077524e629817f43312918f61478df0c33796827f3644ddc04ff9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/19/pg19.rdf",
+          "rdfSha256": "67676282b237138b41c845ae3ddd09bda8c481a9ba7b298a828033c54350b618",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "4a000380f18b2a97e23c16753d2c43ca8539738a927c50e6ef2366d5ffefbf00"
+    },
+    {
+      "id": "gutenberg:Archaeology & Anthropology",
+      "label": "Archaeology & Anthropology",
+      "image": "gutenberg-archaeology-anthropology.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1349",
+          "title": "Russia",
+          "gutenbergId": "1349",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1349/pg1349.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1349",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1349/pg1349.cover.medium.jpg",
+          "coverSha256": "f1e2723df589f90bd433ebcbfc0472ffc852803c5be5db0f2843c4b26b5cd789",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1349/pg1349.rdf",
+          "rdfSha256": "826d3f2286cea5ac5c79e3cbf6df8c48cab166f5175ace6da3d83e8e9d0212ce",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:2873",
+          "title": "The Prehistoric World; Or, Vanished Races",
+          "gutenbergId": "2873",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2873/pg2873.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2873",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2873/pg2873.cover.medium.jpg",
+          "coverSha256": "e156905fe52db2b86695d4dde927c3b7dab29dfcc8a709a116a9e3558ce6746e",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2873/pg2873.rdf",
+          "rdfSha256": "b9bf5c09502e859e7b779783fa8ceba4d9bdc747cdbf81b9d58b3d75a34e30f7",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "8eaeae7038c575f1fb0048a42460466aff2cc8e15dee8dcabdc39b5de083da6c"
+    },
+    {
+      "id": "gutenberg:Architecture",
+      "label": "Architecture",
+      "image": "gutenberg-architecture.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:19960",
+          "title": "Húsabætur á sveitabæjum: Uppdrættir og áætlanir",
+          "gutenbergId": "19960",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/19960/pg19960.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/19960",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/19960/pg19960.cover.medium.jpg",
+          "coverSha256": "cc03733ab2dc4345f9234563682b0f35fa9a853495ba4808571c4beea2ae72f3",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/19960/pg19960.rdf",
+          "rdfSha256": "41a8253393de2eebcfad60fd9b0cb5f211f1cc693e03e7a4588ba282e9325a47",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:20967",
+          "title": "A Guide to Peterborough Cathedral\r\nComprising a brief history of the monastery from its foundation to the present time, with a descriptive account of its architectural peculiarities and recent improvements; compiled from the works of Gunton, Britton, and original & authentic documents",
+          "gutenbergId": "20967",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/20967/pg20967.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/20967",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/20967/pg20967.cover.medium.jpg",
+          "coverSha256": "fdd35cfc02f73b079b69878fee6be17da6437e0574fe4c1428c988435afabf99",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/20967/pg20967.rdf",
+          "rdfSha256": "ceb9af8b8e39a29704618ab6aed7504232e888cbdfa50e9a9e6dbbb0ecb4a731",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "3f386c012644e0bc85903dba6cc0af87f969734ff2f6597f56eb1552054c6943"
+    },
+    {
+      "id": "gutenberg:Art",
+      "label": "Art",
+      "image": "gutenberg-art.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:772",
+          "title": "Moral Emblems",
+          "gutenbergId": "772",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/772/pg772.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/772",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/772/pg772.cover.medium.jpg",
+          "coverSha256": "1634e33811eb27f011e1fedd7de7a8b5213d8da40d65780b382ffe64c5ebf2cc",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/772/pg772.rdf",
+          "rdfSha256": "2e8f56d78aba7aa5d31d90b5348c80903c1fd9287b97df175f3488431e1456bf",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:4073",
+          "title": "Ex Voto: An Account of the Sacro Monte or New Jerusalem at Varallo-Sesia\r\nWith Some Notice of Tabachetti's Remaining Work at the Sanctuary of Crea",
+          "gutenbergId": "4073",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/4073/pg4073.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/4073",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/4073/pg4073.cover.medium.jpg",
+          "coverSha256": "9a353d35f17fbf2be4dde64f28519cf8ef98073e35cb6558ccd4d47a524a56b3",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/4073/pg4073.rdf",
+          "rdfSha256": "5293052dd432618b540bf7b4c1bd1c0f12d92ecb85996541fe9bc939aa7e7890",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "643b7325d434feff6851aabca6a8ccf1f35f06929d50661542fdf2fdfedceb88"
+    },
+    {
+      "id": "gutenberg:Biographies",
+      "label": "Biographies",
+      "image": "gutenberg-biographies.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:23",
+          "title": "Narrative of the Life of Frederick Douglass, an American Slave",
+          "gutenbergId": "23",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/23/pg23.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/23",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/23/pg23.cover.medium.jpg",
+          "coverSha256": "969d765029c89ce0a260676ea7adac4ab6b44475d5890b2e488769d28afa603f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/23/pg23.rdf",
+          "rdfSha256": "b04c99d5cd82e835fcbb0d9045275f7e10f37045a94132ce406b2cedd27c499d",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:148",
+          "title": "The Autobiography of Benjamin Franklin",
+          "gutenbergId": "148",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/148/pg148.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/148",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/148/pg148.cover.medium.jpg",
+          "coverSha256": "4a3a197cb0554e3ee93fdb55ef003231d76174cb8a271cbee427e09bc2714393",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/148/pg148.rdf",
+          "rdfSha256": "025da02a37eab3d5e1608f2c37fab3456214c967b511428868993bc58f2f49d6",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "d57f8311dacb69ae6a20f3484de9ce89d932c7ca6b7ca30c092f07a625d21463"
+    },
+    {
+      "id": "gutenberg:British Literature",
+      "label": "British Literature",
+      "image": "gutenberg-british-literature.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:11",
+          "title": "Alice's Adventures in Wonderland",
+          "gutenbergId": "11",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/11/pg11.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/11",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/11/pg11.cover.medium.jpg",
+          "coverSha256": "26c0f2914dad0940bd10ce37267bfbea9a2b301775a6d3efd9ed993762e5a944",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/11/pg11.rdf",
+          "rdfSha256": "307c976d557021ac465a7cbc22b5c727fa6afdbd67786872b78e0745e2df134b",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:12",
+          "title": "Through the Looking-Glass",
+          "gutenbergId": "12",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/12/pg12.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/12",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/12/pg12.cover.medium.jpg",
+          "coverSha256": "871c199ca02056c8a65dce374b7274805255e0b18568a5ab3dc68fdd8a26080d",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/12/pg12.rdf",
+          "rdfSha256": "d97194f36c2900915c250c99afed01fd5ff79af8556386f6a21c234dfed2c18c",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "1b6543235b2962765388bddb8e358aa51d3975b7b2bdaa6d640e4c0cdabaa710"
+    },
+    {
+      "id": "gutenberg:Business/Management",
+      "label": "Business/Management",
+      "image": "gutenberg-business-management.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:25087",
+          "title": "Twenty Years of Hus'ling",
+          "gutenbergId": "25087",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/25087/pg25087.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/25087",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/25087/pg25087.cover.medium.jpg",
+          "coverSha256": "60505ee067968b0a60c4c33e6eb502a5c547b658c717707a8396e7114dfffb51",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/25087/pg25087.rdf",
+          "rdfSha256": "c1b273561bf5533a126a169202a3b800ea2aeb1fd845e29c688ba5618d7ccb13",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:31494",
+          "title": "The Young Man in Business",
+          "gutenbergId": "31494",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/31494/pg31494.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/31494",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/31494/pg31494.cover.medium.jpg",
+          "coverSha256": "0ab0a7ac70fd306e7c9607ad25dc63835cc9a4ceefbbed1c4ae2ee1048a9c033",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/31494/pg31494.rdf",
+          "rdfSha256": "ab2a7cf7700ba722e6d025a4ce4aa083ba8cd8a53e82d6146aea6a40971a474a",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "52488141430aa7dbdca76645bc77c78f3212a6c5dfe65771ef1022d06b32f26a"
+    },
+    {
+      "id": "gutenberg:Children & Young Adult Reading",
+      "label": "Children & Young Adult Reading",
+      "image": "gutenberg-children-young-adult-reading.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2591",
+          "title": "Grimms' Fairy Tales",
+          "gutenbergId": "2591",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2591/pg2591.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2591",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2591/pg2591.cover.medium.jpg",
+          "coverSha256": "f69dfc6b8e93a2a61450110d332c4b71e5f4a8c39c545783e090ec093fc9ae29",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2591/pg2591.rdf",
+          "rdfSha256": "98f9f4b012ace7957f613438fdf73c2a84b771f354eed325e15ccef3c9450c64",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:11",
+          "title": "Alice's Adventures in Wonderland",
+          "gutenbergId": "11",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/11/pg11.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/11",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/11/pg11.cover.medium.jpg",
+          "coverSha256": "26c0f2914dad0940bd10ce37267bfbea9a2b301775a6d3efd9ed993762e5a944",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/11/pg11.rdf",
+          "rdfSha256": "307c976d557021ac465a7cbc22b5c727fa6afdbd67786872b78e0745e2df134b",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "e85adf8d4f4c12efbd5bcd57f245dcb92d583f9d5b86affa49ebe8bfb9b8d240"
+    },
+    {
+      "id": "gutenberg:Classics of Literature",
+      "label": "Classics of Literature",
+      "image": "gutenberg-classics-of-literature.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2701",
+          "title": "Moby Dick; Or, The Whale",
+          "gutenbergId": "2701",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2701/pg2701.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2701",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2701/pg2701.cover.medium.jpg",
+          "coverSha256": "39d44ea52dc4292242fe5d982535056bc7f27cc42b45cc7e9035c1710c7ae045",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2701/pg2701.rdf",
+          "rdfSha256": "c1ea689819d144ed4476f1a6671423aa747dc257d8ef6a9d1fba4e49ceb3716a",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1342",
+          "title": "Pride and Prejudice",
+          "gutenbergId": "1342",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1342",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1342/pg1342.cover.medium.jpg",
+          "coverSha256": "09dac7bcaad56ad2229588acb9fc97ed32a4cf91da98677210f7de8800170091",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1342/pg1342.rdf",
+          "rdfSha256": "fc020ca4305b1f30790c3e55eed07f788b79f6868a4615c08a22b5398c818987",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "dc7a5e9413d5fb2e4b5f98d6949c90df15fefe0a9dac3deacaab51096c7a1d4d"
+    },
+    {
+      "id": "gutenberg:Cooking & Drinking",
+      "label": "Cooking & Drinking",
+      "image": "gutenberg-cooking-drinking.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:12238",
+          "title": "Science in the Kitchen\r\nA Scientific Treatise On Food Substances and Their Dietetic Properties, Together with a Practical Explanation of the Principles of Healthful Cookery, and a Large Number of Original, Palatable, and Wholesome Recipes",
+          "gutenbergId": "12238",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/12238/pg12238.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/12238",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/12238/pg12238.cover.medium.jpg",
+          "coverSha256": "5c28fd2a9d14335c16b31a87236bfc8debe26b0747deb860b99ea9b8cd8ed68f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/12238/pg12238.rdf",
+          "rdfSha256": "0b59ac2f86997295e98168c9a5c54ef12a24ffef6c6fa07087869b33aef6a674",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:13177",
+          "title": "Chocolate and Cocoa Recipes and Home Made Candy Recipes",
+          "gutenbergId": "13177",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/13177/pg13177.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/13177",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/13177/pg13177.cover.medium.jpg",
+          "coverSha256": "3d2732f36a788525b57414f86c9c8b324e6090a14d54afb1755fca3c951aab10",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/13177/pg13177.rdf",
+          "rdfSha256": "3b49d4b4277b433caef580646cc15aedfece1c6eceffa5ef26128db6ee6b91d0",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "d88f7f846addf07011fb1f2c151e6e07ea5fd132c65ebc36f1c558460cb346f4"
+    },
+    {
+      "id": "gutenberg:Crime, Thrillers and Mystery",
+      "label": "Crime, Thrillers and Mystery",
+      "image": "gutenberg-crime-thrillers-and-mystery.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2554",
+          "title": "Crime and Punishment",
+          "gutenbergId": "2554",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2554/pg2554.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2554",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2554/pg2554.cover.medium.jpg",
+          "coverSha256": "d9148ca66a0f077e9afb1c3b4bffdb0cb542468d62f9b4457d79432244f93f0d",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2554/pg2554.rdf",
+          "rdfSha256": "e0cf25ece9cc8c609d4548699d8f1f05fdc054f8606d5a04dabb7bd50d356294",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1661",
+          "title": "The Adventures of Sherlock Holmes",
+          "gutenbergId": "1661",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1661/pg1661.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1661",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1661/pg1661.cover.medium.jpg",
+          "coverSha256": "d0e7b2fcd71818c49ca06ade9e143ac55371b05d4449e242f66d7875d5c2d052",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1661/pg1661.rdf",
+          "rdfSha256": "79f7ebdf3453472604f1e9ba6d643a2d78cc607afd0845bc821652da201d14fb",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "5662c5c7827fc9f1dad09eee59d8f02b96687c9a852472477c8f4451a8513e2f"
+    },
+    {
+      "id": "gutenberg:Drugs/Alcohol/Pharmacology",
+      "label": "Drugs/Alcohol/Pharmacology",
+      "image": "gutenberg-drugs-alcohol-pharmacology.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:13889",
+          "title": "Dave Ranney\r\nOr, Thirty Years on the Bowery; An Autobiography",
+          "gutenbergId": "13889",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/13889/pg13889.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/13889",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/13889/pg13889.cover.medium.jpg",
+          "coverSha256": "135dc2136a329a34eb00c8774128632e4fd0fb0cf140ad98c25a2e30304b2900",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/13889/pg13889.rdf",
+          "rdfSha256": "21af5cc7813a736bb8389d1aedbe1b52106ff5aeda8f9b771c6ed8f95c68e07e",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:31230",
+          "title": "Allopathy and Homoeopathy Before the Judgment of Common Sense!",
+          "gutenbergId": "31230",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/31230/pg31230.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/31230",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/31230/pg31230.cover.medium.jpg",
+          "coverSha256": "5ad713cb665f28c4bbc0629f358f05f3fe7f1ef1123b80696633ee4f086f50aa",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/31230/pg31230.rdf",
+          "rdfSha256": "3ba8347a27007d35bf2d4b846131839f5a3a44d00179733346912813f88cb6d9",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "982f88f113ff6df63d13ab31a2bef89882360b7c41429d67c1c941d38f97892c"
+    },
+    {
+      "id": "gutenberg:Economics",
+      "label": "Economics",
+      "image": "gutenberg-economics.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:14",
+          "title": "The 1990 CIA World Factbook",
+          "gutenbergId": "14",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/14/pg14.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/14",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/14/pg14.cover.medium.jpg",
+          "coverSha256": "868d566eca213654d780320cb1a935e7b72d68139bf29541407cdafc7beddd12",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/14/pg14.rdf",
+          "rdfSha256": "7d163f591ac92eb0f852cea9b680267db4e586c010f6f753d70df202d49aa23f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:3300",
+          "title": "An Inquiry into the Nature and Causes of the Wealth of Nations",
+          "gutenbergId": "3300",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/3300/pg3300.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/3300",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/3300/pg3300.cover.medium.jpg",
+          "coverSha256": "0ac29d5ddc99b5ba3c8ee6667ccad51b0178eea0b02f0bf79dfdac2e08eae261",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/3300/pg3300.rdf",
+          "rdfSha256": "c3f05819e6e2b0ec2a5bf6a342544a37cc9217e76156b4612a66ef6cdaf88ae8",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "35cd770347ff5e982dba2173d775d583ed62843606c7ba0439b3bf7752d58bdb"
+    },
+    {
+      "id": "gutenberg:Encyclopedias/Dictionaries/Reference",
+      "label": "Encyclopedias/Dictionaries/Reference",
+      "image": "gutenberg-encyclopedias-dictionaries-reference.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:14",
+          "title": "The 1990 CIA World Factbook",
+          "gutenbergId": "14",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/14/pg14.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/14",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/14/pg14.cover.medium.jpg",
+          "coverSha256": "868d566eca213654d780320cb1a935e7b72d68139bf29541407cdafc7beddd12",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/14/pg14.rdf",
+          "rdfSha256": "7d163f591ac92eb0f852cea9b680267db4e586c010f6f753d70df202d49aa23f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:22",
+          "title": "Roget's Thesaurus",
+          "gutenbergId": "22",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/22/pg22.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/22",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/22/pg22.cover.medium.jpg",
+          "coverSha256": "b723a1c27f9e98d520b6b41e9727aa4be7c4c5be8e25cc86321b1aadfa7aaab4",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/22/pg22.rdf",
+          "rdfSha256": "ed0ca1841e24e56b30b714268243f2b5d7c05be7f52a08b140e0eaad75cd7f99",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "ef788c1543e1a186ab852a3da8f9cf99ab843827685cd7f663be55a34cdfca8b"
+    },
+    {
+      "id": "gutenberg:Engineering & Technology",
+      "label": "Engineering & Technology",
+      "image": "gutenberg-engineering-technology.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:12443",
+          "title": "The jute industry",
+          "gutenbergId": "12443",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/12443/pg12443.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/12443",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/12443/pg12443.cover.medium.jpg",
+          "coverSha256": "c5b6e39aea7550d38855d6426abf4e34d30cae8f2992c2091ccc0b91651f4545",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/12443/pg12443.rdf",
+          "rdfSha256": "932080562e7dd8e5b23ad465097d4df587056184291faaa63b0009feca10982d",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:27936",
+          "title": "Histoire des nombres et de la numération mécanique",
+          "gutenbergId": "27936",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/27936/pg27936.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/27936",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/27936/pg27936.cover.medium.jpg",
+          "coverSha256": "55a690929f6d23f54974ef30f3481ebadd0fba139542ffa6477b91f510323333",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/27936/pg27936.rdf",
+          "rdfSha256": "14cc09058fc3f2262ca88a692006c975ec11354e46a44e920d362c7367b1d2d4",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "6b38bb1de1b2840f7528c55ca5752f3580ed153f40f6b1a01f4995b6bf563f33"
+    },
+    {
+      "id": "gutenberg:Environmental Issues",
+      "label": "Environmental Issues",
+      "image": "gutenberg-environmental-issues.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2009",
+          "title": "The Origin of Species by Means of Natural Selection\r\nOr, the Preservation of Favoured Races in the Struggle for Life, 6th Edition",
+          "gutenbergId": "2009",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2009/pg2009.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2009",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2009/pg2009.cover.medium.jpg",
+          "coverSha256": "a918b3132fc8233d079f698bdd7da1811074bfb92b0bc85da1b40efce0a7739f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2009/pg2009.rdf",
+          "rdfSha256": "4bebed13e7bb729ecf9878b3912bed37dab023ddd7bb125b173dd7d2a476ce18",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:17682",
+          "title": "The Healthy Life, Vol. V, Nos. 24-28\nThe Independent Health Magazine",
+          "gutenbergId": "17682",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/17682/pg17682.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/17682",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/17682/pg17682.cover.medium.jpg",
+          "coverSha256": "97539d00e3b9e801da1ebe43323459df06f379f0d66cb43cf858966dce38c45c",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/17682/pg17682.rdf",
+          "rdfSha256": "bcf5aaf56de0ed12b4aa91c222ed5781f1b7e38c7fe64119077702c5ef5b8abe",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "d713634fe789b059ffb24dbe7865951aa8267a0e68d7cb51b221e29694295093"
+    },
+    {
+      "id": "gutenberg:Essays, Letters & Speeches",
+      "label": "Essays, Letters & Speeches",
+      "image": "gutenberg-essays-letters-speeches.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1",
+          "title": "The Declaration of Independence of the United States of America",
+          "gutenbergId": "1",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1/pg1.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.cover.medium.jpg",
+          "coverSha256": "7e59773ff55855b3d74aa1205a6c75335a9442272507043372d5dde33a61a8e9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.rdf",
+          "rdfSha256": "2ab3a71d0382eb59ee70125d6301365c6ad17528d917725a00453f70c57a151f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:3",
+          "title": "John F. Kennedy's Inaugural Address",
+          "gutenbergId": "3",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/3/pg3.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/3",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/3/pg3.cover.medium.jpg",
+          "coverSha256": "951388e2066cdd48ea1e6041e4cd18f5880845a2daddc736b28cbd405c236260",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/3/pg3.rdf",
+          "rdfSha256": "f5552515536825f54087586d8442135b4c04b53ba950a61cf98c6178572976a1",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "ec16b3e6872260833795935b665801ad77011cb360e738f1c96eb259ec4c8aed"
+    },
+    {
+      "id": "gutenberg:Fashion",
+      "label": "Fashion",
+      "image": "gutenberg-fashion.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:10115",
+          "title": "Two Centuries of Costume in America, Volume 1 (1620-1820)",
+          "gutenbergId": "10115",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/10115/pg10115.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/10115",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/10115/pg10115.cover.medium.jpg",
+          "coverSha256": "ee14f7be91b94e1ce9cb21035f7abbafba59c295e5e7f8b2fcc3dc715bf1c35b",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/10115/pg10115.rdf",
+          "rdfSha256": "b60750d53dd6a18fcdadd8929da30918a2b5960768ae7d6c116556392b061249",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:34186",
+          "title": "The Copeland method",
+          "gutenbergId": "34186",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/34186/pg34186.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/34186",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/34186/pg34186.cover.medium.jpg",
+          "coverSha256": "5ac554cd7277ccfaa26e26691d67efe7b2e8be137e91676743a1da2edbe0a1d6",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/34186/pg34186.rdf",
+          "rdfSha256": "0e6273744a2d677290d80a4da41d91efe41a8f64df29d5bbdeed55b55a010111",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "fb0302fd4b48e6df95421be1176fe057db423a0aa1a8d67133b8e136cecbfbc4"
+    },
+    {
+      "id": "gutenberg:French Literature",
+      "label": "French Literature",
+      "image": "gutenberg-french-literature.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:83",
+          "title": "From the Earth to the moon; and, round the moon",
+          "gutenbergId": "83",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/83/pg83.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/83",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/83/pg83.cover.medium.jpg",
+          "coverSha256": "ecd401dc544a1f5925f36dd631060e2688c800b9a2202fcb01fb62cba096132c",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/83/pg83.rdf",
+          "rdfSha256": "7d22959a63f32b9df15dc3a2adb535f7c895999ea922f67b797727384d836c4f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:103",
+          "title": "Around the World in Eighty Days",
+          "gutenbergId": "103",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/103/pg103.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/103",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/103/pg103.cover.medium.jpg",
+          "coverSha256": "095e92f86d210668e3cc2a320b6c468773144180ee5d2f48a414b86405c52747",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/103/pg103.rdf",
+          "rdfSha256": "93f9c2627339a77467a62a26a42e7028c3bb092bf6cb832968bb13a32efa7285",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "70fbe6a8389a91a9425c21fb779d8ce832c54f7035e9ef62c4e9c612b1bf688a"
+    },
+    {
+      "id": "gutenberg:Gender & Sexuality Studies",
+      "label": "Gender & Sexuality Studies",
+      "image": "gutenberg-gender-sexuality-studies.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:32",
+          "title": "Herland",
+          "gutenbergId": "32",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/32/pg32.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/32",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/32/pg32.cover.medium.jpg",
+          "coverSha256": "43719273ede9cebbeacbfdc6a2100b0c53636b6c4bed143271c8f8c433b5c5c9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/32/pg32.rdf",
+          "rdfSha256": "13387606a30c707501b9834f5518377e6a822d62db207c0ce4f767951a61ed2c",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:2195",
+          "title": "The Master of Mrs. Chilvers: An Improbable Comedy",
+          "gutenbergId": "2195",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2195/pg2195.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2195",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2195/pg2195.cover.medium.jpg",
+          "coverSha256": "38c29c17a75b2fc06f67abecb7180fb93e19e8cd526ad54f5e37a0bbe7db7466",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2195/pg2195.rdf",
+          "rdfSha256": "3944b812b8546cec86dfd1f200e0055c5a9bad9ce0010698433ebc73a33db0a5",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "84ba23e9ef9c5ad39a0cdbba6a5b42e0b2a765f48281b840b231bfc37f1d5982"
+    },
+    {
+      "id": "gutenberg:German Literature",
+      "label": "German Literature",
+      "image": "gutenberg-german-literature.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1327",
+          "title": "Elizabeth and Her German Garden",
+          "gutenbergId": "1327",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1327/pg1327.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1327",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1327/pg1327.cover.medium.jpg",
+          "coverSha256": "0e1a725a13dee1aef31b7291a5afdaeca82106bdb3e2ec61176a9004362b172a",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1327/pg1327.rdf",
+          "rdfSha256": "a7784ee4fb0c071f0db1f60e19eb918296311fa46f3cb4e0f483f57f60b22fdc",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1998",
+          "title": "Thus Spake Zarathustra: A Book for All and None",
+          "gutenbergId": "1998",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1998/pg1998.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1998",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1998/pg1998.cover.medium.jpg",
+          "coverSha256": "8bddb7f3dd081fa3bd8647f1dbe80150060423b8efa7de423a979f927d6c0da3",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1998/pg1998.rdf",
+          "rdfSha256": "f9266d3788306270ec8bf4148ef0534f5a54a43b6ea67fc13e17fef0c61be9ba",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "2ac54e15780f2c1f1c666154ab2fde6b32f3d130f55aa57db0bf06cfca886e8f"
+    },
+    {
+      "id": "gutenberg:Health & Medicine",
+      "label": "Health & Medicine",
+      "image": "gutenberg-health-medicine.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:423",
+          "title": "Round the Red Lamp: Being Facts and Fancies of Medical Life",
+          "gutenbergId": "423",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/423/pg423.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/423",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/423/pg423.cover.medium.jpg",
+          "coverSha256": "f5a8b7a2383e84ebcdddf53b5791a457b676498582db3085e7ad51fed9f9cbff",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/423/pg423.rdf",
+          "rdfSha256": "0e713f47f1ce7ba802e90e374c7755f7a7d64df6c2112aeb8528247945012d5c",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:3837",
+          "title": "Hospital Sketches",
+          "gutenbergId": "3837",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/3837/pg3837.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/3837",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/3837/pg3837.cover.medium.jpg",
+          "coverSha256": "fb81c80ae388b85c753054bb95270c133cd45a3bb9afb0076cbfc0504dee529e",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/3837/pg3837.rdf",
+          "rdfSha256": "c9300d94b50ac8bb74d744faf4d0144745967ad881574d699a0f6a7a012b0d2e",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "3ac58d2b08818dd180182f29090ad8dddd28ce3f9fd2998be076b70c69dabac6"
+    },
+    {
+      "id": "gutenberg:Historical Novels",
+      "label": "Historical Novels",
+      "image": "gutenberg-historical-novels.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:82",
+          "title": "Ivanhoe: A Romance",
+          "gutenbergId": "82",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/82/pg82.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/82",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/82/pg82.cover.medium.jpg",
+          "coverSha256": "233a5037a5acd5dafe98e1958712056a267eb7f166e630be0b2aa3fedc6c2ab2",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/82/pg82.rdf",
+          "rdfSha256": "82ec95180d435735e462fff615278f729e0c220a50ef6de7b39701dcd2f4a529",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:135",
+          "title": "Les Misérables",
+          "gutenbergId": "135",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/135/pg135.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/135",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/135/pg135.cover.medium.jpg",
+          "coverSha256": "2bdd287b5f5bb314c0e0459fc02627022bc998ef51f439d3311bb3c965d4e1af",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/135/pg135.rdf",
+          "rdfSha256": "ad26cc69ed39aeea5e480eb024b11d8fe6a8c4a8c7e68dff6dc9634804cb6719",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "e08337237dd9e0f1841e257f2acdc534ac3571a746847acad644ef140b382711"
+    },
+    {
+      "id": "gutenberg:History - American",
+      "label": "History - American",
+      "image": "gutenberg-history-american.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1",
+          "title": "The Declaration of Independence of the United States of America",
+          "gutenbergId": "1",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1/pg1.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.cover.medium.jpg",
+          "coverSha256": "7e59773ff55855b3d74aa1205a6c75335a9442272507043372d5dde33a61a8e9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.rdf",
+          "rdfSha256": "2ab3a71d0382eb59ee70125d6301365c6ad17528d917725a00453f70c57a151f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:2",
+          "title": "The United States Bill of Rights\r\nThe Ten Original Amendments to the Constitution of the United States",
+          "gutenbergId": "2",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2/pg2.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2/pg2.cover.medium.jpg",
+          "coverSha256": "3b29cf5cd53879439d5326788ac987a2b6be34497911585d54b3dc5576d350a4",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2/pg2.rdf",
+          "rdfSha256": "5462911e6f691b5ee9f22f24a0ac789706217fb3d54a59325ef1a626a174663b",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "961d0a9585740bb536be75617907848482589c24d49a4fd5a6fe341428feafcf"
+    },
+    {
+      "id": "gutenberg:History - Ancient",
+      "label": "History - Ancient",
+      "image": "gutenberg-history-ancient.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:30",
+          "title": "The Bible, King James Version, Complete",
+          "gutenbergId": "30",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/30/pg30.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/30",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/30/pg30.cover.medium.jpg",
+          "coverSha256": "cc24fc5a18177a7b04239c61825f1052f6234efb802a139806d6ad8fa96453b9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/30/pg30.rdf",
+          "rdfSha256": "49f551fcb28fddd250c2ff2b57162084314cc16be1a6b7a1019470c00a11a4a5",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:132",
+          "title": "The Art of War",
+          "gutenbergId": "132",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/132/pg132.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/132",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/132/pg132.cover.medium.jpg",
+          "coverSha256": "f195137b5988a438af15e235cc748636be5e3a8625afda8b2fc87b513dd8192f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/132/pg132.rdf",
+          "rdfSha256": "caec4ac7fb8c2a5f9f90781ea8109473a8999fe29b5f17290552b38fe5230934",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "d0ece7578f8c69ca12f22fd716c490d0756e1c110646c8ea49aa6ec7cf957999"
+    },
+    {
+      "id": "gutenberg:History - British",
+      "label": "History - British",
+      "image": "gutenberg-history-british.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:147",
+          "title": "Common Sense",
+          "gutenbergId": "147",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/147/pg147.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/147",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/147/pg147.cover.medium.jpg",
+          "coverSha256": "81619496ccec59f02fc49c5304a6816df3d6c50e33353c10ee523883bbfb0ca3",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/147/pg147.rdf",
+          "rdfSha256": "31f3ef37e320a22cd52a35e86090ead29e099ee0833732258b3d5f030eae34cc",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1100",
+          "title": "King Henry VI, Part 1",
+          "gutenbergId": "1100",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1100/pg1100.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1100",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1100/pg1100.cover.medium.jpg",
+          "coverSha256": "66cad52407042ff3a8da44af351b00426fb0fc6883c162313ec3b7c21ee77081",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1100/pg1100.rdf",
+          "rdfSha256": "29495df408895fbd4c22ca62319b301e3889a128ed3e03ec37e03190318e2c4a",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "e48135462091ae1d253586e35b5bf955a41abbd8bbef31d9d286572cf1749563"
+    },
+    {
+      "id": "gutenberg:History - Early Modern (c. 1450-1750)",
+      "label": "History - Early Modern (c. 1450-1750)",
+      "image": "gutenberg-history-early-modern-c-1450-1750-.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:7",
+          "title": "The Mayflower Compact",
+          "gutenbergId": "7",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/7/pg7.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/7",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/7/pg7.cover.medium.jpg",
+          "coverSha256": "9b00a2cb5315ba114b518fc46aa5b7b2884dcbf1bc9b3a6a15c104ec78fc1c82",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/7/pg7.rdf",
+          "rdfSha256": "0ea422e4682c3fda7d7d931334e08a77eda7d4bed8d8f248534d2cccf7d6bad8",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1232",
+          "title": "The Prince",
+          "gutenbergId": "1232",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1232/pg1232.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1232",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1232/pg1232.cover.medium.jpg",
+          "coverSha256": "db32081e9f444aaf2b500d364eaac6d42f03ed67a35032e9c919fed423abe21b",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1232/pg1232.rdf",
+          "rdfSha256": "75f53c2c154b8c84e47f0291c82870a9c85a97750103031fa1ef0e2954d283aa",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "1a4f023c0dad3b8a5e73bdbcf89409e50fbfe15614859e07f17fe1e5e68d6c0d"
+    },
+    {
+      "id": "gutenberg:History - European",
+      "label": "History - European",
+      "image": "gutenberg-history-european.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:734",
+          "title": "History of the Decline and Fall of the Roman Empire — Volume 4",
+          "gutenbergId": "734",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/734/pg734.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/734",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/734/pg734.cover.medium.jpg",
+          "coverSha256": "c519619f6d677c6c8a58408a5e990cc45b5b00e84eb9b4b45265339017569c9f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/734/pg734.rdf",
+          "rdfSha256": "651017270d49210e7df4656f5c4c2cc5f10519e029ade101edd97b7160f7c484",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:892",
+          "title": "History of the Decline and Fall of the Roman Empire — Volume 3",
+          "gutenbergId": "892",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/892/pg892.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/892",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/892/pg892.cover.medium.jpg",
+          "coverSha256": "a7b98c1f3be42093546f0fd43ef57452498b738461ab2d226970e73197be8c1f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/892/pg892.rdf",
+          "rdfSha256": "b8e3f9a829367dde44890c6caefb94263e5c6c27e0cfc10611e4580bc27d2a51",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "37f27e4a829e7748ee0fda7c9561f0523dea1c9cc2bd2625986283768fec965b"
+    },
+    {
+      "id": "gutenberg:History - Medieval/Middle Ages",
+      "label": "History - Medieval/Middle Ages",
+      "image": "gutenberg-history-medieval-middle-ages.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:734",
+          "title": "History of the Decline and Fall of the Roman Empire — Volume 4",
+          "gutenbergId": "734",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/734/pg734.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/734",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/734/pg734.cover.medium.jpg",
+          "coverSha256": "c519619f6d677c6c8a58408a5e990cc45b5b00e84eb9b4b45265339017569c9f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/734/pg734.rdf",
+          "rdfSha256": "651017270d49210e7df4656f5c4c2cc5f10519e029ade101edd97b7160f7c484",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:894",
+          "title": "History of the Decline and Fall of the Roman Empire — Volume 5",
+          "gutenbergId": "894",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/894/pg894.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/894",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/894/pg894.cover.medium.jpg",
+          "coverSha256": "a7b98c1f3be42093546f0fd43ef57452498b738461ab2d226970e73197be8c1f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/894/pg894.rdf",
+          "rdfSha256": "3ee3338430760492c0e4161d605e0e0c641c92b18a92232834f66d0b1b7bac6d",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "37f27e4a829e7748ee0fda7c9561f0523dea1c9cc2bd2625986283768fec965b"
+    },
+    {
+      "id": "gutenberg:History - Modern (1750+)",
+      "label": "History - Modern (1750+)",
+      "image": "gutenberg-history-modern-1750-.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1",
+          "title": "The Declaration of Independence of the United States of America",
+          "gutenbergId": "1",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1/pg1.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.cover.medium.jpg",
+          "coverSha256": "7e59773ff55855b3d74aa1205a6c75335a9442272507043372d5dde33a61a8e9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.rdf",
+          "rdfSha256": "2ab3a71d0382eb59ee70125d6301365c6ad17528d917725a00453f70c57a151f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:4",
+          "title": "Lincoln's Gettysburg Address\r\nGiven November 19, 1863 on the battlefield near Gettysburg, Pennsylvania, USA",
+          "gutenbergId": "4",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/4/pg4.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/4",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/4/pg4.cover.medium.jpg",
+          "coverSha256": "0f46efaf053bbb0e3c166bcdd0b31911756b781c1830e1050e60a994e73d262d",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/4/pg4.rdf",
+          "rdfSha256": "d864e526ebca53a84685cd403ce18883beb43ee40f74982d39fc70d1db3b6304",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "ffffc0c56c0ade35a0a24920952eb848369bc08c8c7e6c90729142fce0b64a8c"
+    },
+    {
+      "id": "gutenberg:History - Other",
+      "label": "History - Other",
+      "image": "gutenberg-history-other.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2156",
+          "title": "China and the Manchus",
+          "gutenbergId": "2156",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2156/pg2156.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2156",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2156/pg2156.cover.medium.jpg",
+          "coverSha256": "fa821e57a1a664dea88cf4694f0b9fd8125e99d76f9bc866f7c017d423c3da02",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2156/pg2156.rdf",
+          "rdfSha256": "430735d293e4d334397edfe59d9b082a8d89e29035be61f5ceaed90628e8cc0e",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:2760",
+          "title": "Celebrated Crimes (Complete)",
+          "gutenbergId": "2760",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2760/pg2760.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2760",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2760/pg2760.cover.medium.jpg",
+          "coverSha256": "e1a8a530f931d75340e19891e6fbea96c17a567e568fb20043899d32fc4fbe25",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2760/pg2760.rdf",
+          "rdfSha256": "56da0536bf81dc5f9b4ce0e1e112fbcc868365e3018b1a0dfc110b15f5a589b7",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "b384d14186c7ed9826dc8fd2ed633d7cb7ba7031e03defb81b90d64dc5162cc7"
+    },
+    {
+      "id": "gutenberg:History - Religious",
+      "label": "History - Religious",
+      "image": "gutenberg-history-religious.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:7",
+          "title": "The Mayflower Compact",
+          "gutenbergId": "7",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/7/pg7.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/7",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/7/pg7.cover.medium.jpg",
+          "coverSha256": "9b00a2cb5315ba114b518fc46aa5b7b2884dcbf1bc9b3a6a15c104ec78fc1c82",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/7/pg7.rdf",
+          "rdfSha256": "0ea422e4682c3fda7d7d931334e08a77eda7d4bed8d8f248534d2cccf7d6bad8",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:732",
+          "title": "History of the Decline and Fall of the Roman Empire — Volume 2",
+          "gutenbergId": "732",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/732/pg732.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/732",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/732/pg732.cover.medium.jpg",
+          "coverSha256": "c519619f6d677c6c8a58408a5e990cc45b5b00e84eb9b4b45265339017569c9f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/732/pg732.rdf",
+          "rdfSha256": "d558e205853ae882b111c5afadf1f97ed12b901a8bc33e1747065798e0a0bbec",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "8838e32537e8e38c02d3faf6bb5f287df9c8875137162d5a219a35a4091b1c4c"
+    },
+    {
+      "id": "gutenberg:History - Royalty",
+      "label": "History - Royalty",
+      "image": "gutenberg-history-royalty.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:735",
+          "title": "History of the Decline and Fall of the Roman Empire — Volume 5",
+          "gutenbergId": "735",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/735/pg735.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/735",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/735/pg735.cover.medium.jpg",
+          "coverSha256": "c519619f6d677c6c8a58408a5e990cc45b5b00e84eb9b4b45265339017569c9f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/735/pg735.rdf",
+          "rdfSha256": "e5aa7d34ef20d065324bf2dc1be72e9c82dfd4f8b8a9a480bd4aad0ad8065054",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1119",
+          "title": "King Henry V",
+          "gutenbergId": "1119",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1119/pg1119.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1119",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1119/pg1119.cover.medium.jpg",
+          "coverSha256": "ec3c5dc5c41f5b74905571f4a636adf8646c0e3a19a00dc2d7abc17e81a5b8ed",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1119/pg1119.rdf",
+          "rdfSha256": "6ff3b9d06ae4711da28e57f21998cb8c1314c6fe2828232791dfdec5d5e5d3c3",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "8bf6a1dc3a4d26435b1abf55aea84fc7f4a5e12e6776156e93fa3db9fe77cd9f"
+    },
+    {
+      "id": "gutenberg:History - Schools & Universities",
+      "label": "History - Schools & Universities",
+      "image": "gutenberg-history-schools-universities.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1275",
+          "title": "Alexandria and Her Schools\r\nFour Lectures Delivered at the Philosophical Institution, Edinburgh",
+          "gutenbergId": "1275",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1275/pg1275.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1275",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1275/pg1275.cover.medium.jpg",
+          "coverSha256": "eba66aa9a3ed970f71730da36bc79c65ffbb25dc06b29b16d79cc0471c511f2a",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1275/pg1275.rdf",
+          "rdfSha256": "f738db5ac8e312e1b7641b6a3be083d3edb8fd93488ba6338773e46bfa17b624",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1615",
+          "title": "Old English libraries",
+          "gutenbergId": "1615",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1615/pg1615.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1615",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1615/pg1615.cover.medium.jpg",
+          "coverSha256": "dc717108dc81eb7e968b88adf71911a6841370f47c151a07b0655c3c977e5bd6",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1615/pg1615.rdf",
+          "rdfSha256": "04b0bc7ea0c7fd30a6cfb8fcb065ebbf1c7184c97cc8c785c8b9bd33d5a8875d",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "c96f214f96de6ba533229e9a5f0def8d7a9d3460a0fa05ee78be57fcdcc2316d"
+    },
+    {
+      "id": "gutenberg:History - Warfare",
+      "label": "History - Warfare",
+      "image": "gutenberg-history-warfare.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:73",
+          "title": "The Red Badge of Courage: An Episode of the American Civil War",
+          "gutenbergId": "73",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/73/pg73.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/73",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/73/pg73.cover.medium.jpg",
+          "coverSha256": "2ec1e4d7ca9168d2f339aef64b3df196f73b9b67fc85f06d590c63677baacd97",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/73/pg73.rdf",
+          "rdfSha256": "d43f72503de0230c5d6b2a9419518d6eae4c516d36f2fb010b850e4fecb2bfe2",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:132",
+          "title": "The Art of War",
+          "gutenbergId": "132",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/132/pg132.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/132",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/132/pg132.cover.medium.jpg",
+          "coverSha256": "f195137b5988a438af15e235cc748636be5e3a8625afda8b2fc87b513dd8192f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/132/pg132.rdf",
+          "rdfSha256": "caec4ac7fb8c2a5f9f90781ea8109473a8999fe29b5f17290552b38fe5230934",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "de35263516b4841ba5aefc84874d8cd90e987b1d08a8657eeaf024aadc9f5254"
+    },
+    {
+      "id": "gutenberg:How To ...",
+      "label": "How To ...",
+      "image": "gutenberg-how-to-.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1593",
+          "title": "How to Tell the Birds from the Flowers: A Manual of Flornithology for Beginners",
+          "gutenbergId": "1593",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1593/pg1593.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1593",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1593/pg1593.cover.medium.jpg",
+          "coverSha256": "d98e6f78b76b0cba2e4e0c73ffb2c6cdc7d190f24296aa150d564c0302e1f1b1",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1593/pg1593.rdf",
+          "rdfSha256": "e91f22c70710fdd3804bfa398b136383f3a654569bc544d5a9416e23c69ee619",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:5614",
+          "title": "Chess Strategy",
+          "gutenbergId": "5614",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/5614/pg5614.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/5614",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/5614/pg5614.cover.medium.jpg",
+          "coverSha256": "2fec56d95599ad15ae79dbfea97b4f332bb11c50c99ef1294277c4d3a7a82f01",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/5614/pg5614.rdf",
+          "rdfSha256": "42767e2f8de9e9cc3255a9543e24c1c4d4686a866e3decdc47130f095d105057",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "6c3e5ea25d85a4ec9513861d231bcb649980a4ead06ec352fc61cf5b5ed762db"
+    },
+    {
+      "id": "gutenberg:Humour",
+      "label": "Humour",
+      "image": "gutenberg-humour.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:13",
+          "title": "The Hunting of the Snark: An Agony in Eight Fits",
+          "gutenbergId": "13",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/13/pg13.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/13",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/13/pg13.cover.medium.jpg",
+          "coverSha256": "ebddb4bf60df02acfcc3f1cefd077e956c0650fc88106a2379f0abc36643ceca",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/13/pg13.rdf",
+          "rdfSha256": "8ab3d6aa5da5df77486cb155447d2c9e0651fab543c3ceaf5cfe405cf442e0e9",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:86",
+          "title": "A Connecticut Yankee in King Arthur's Court",
+          "gutenbergId": "86",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/86/pg86.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/86",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/86/pg86.cover.medium.jpg",
+          "coverSha256": "51c8e0a6d9247b9327d3cadab8f59148851a192a7482076e57801d1ed1e5c4ce",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/86/pg86.rdf",
+          "rdfSha256": "c2837051e797a24ad20924dc4f1997afa484b2bbb847623bdcab5874221b8e94",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "71a203217a5ef43775f1776a16ea46daea3668cc1ba61ade282f59174ec5b07e"
+    },
+    {
+      "id": "gutenberg:Journalism/Media/Writing",
+      "label": "Journalism/Media/Writing",
+      "image": "gutenberg-journalism-media-writing.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:9636",
+          "title": "Punchinello, Volume 1, No. 12, June 18, 1870",
+          "gutenbergId": "9636",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/9636/pg9636.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/9636",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/9636/pg9636.cover.medium.jpg",
+          "coverSha256": "3131261b41ef1a8094f68c09caaedc4f69aebd1c6ce01795b426d6a90c142c85",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/9636/pg9636.rdf",
+          "rdfSha256": "a0dee2ee651c4f6bce7b3ce3a5c69c9204f1eafef3efbd42b064c874885dcf88",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:15785",
+          "title": "The Great Round World and What Is Going On In It, Vol. 1, No. 35, July 8, 1897\nA Weekly Magazine for Boys and Girls",
+          "gutenbergId": "15785",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/15785/pg15785.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/15785",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/15785/pg15785.cover.medium.jpg",
+          "coverSha256": "be14481a9b725a94445c55826df495df4c24f1ff1c4a1e746fa7686076bdbe46",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/15785/pg15785.rdf",
+          "rdfSha256": "0d0380e2296720d0c8046f3af61ef4628a29792a8e14958fb192f8abe0644969",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "85a522cbca6ade7201736e167bba5337830d3bc5ce39c622cada87f43fdcc71b"
+    },
+    {
+      "id": "gutenberg:Journals",
+      "label": "Journals",
+      "image": "gutenberg-journals.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:14979",
+          "title": "Cape Cod and All the Pilgrim Land, June 1922,  Volume 6, Number 4\nA Monthly Magazine Devoted to the Interests of Southeastern Massachusetts",
+          "gutenbergId": "14979",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/14979/pg14979.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/14979",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/14979/pg14979.cover.medium.jpg",
+          "coverSha256": "9913d08f45840ec3cd99f345f1bd1f0220fb5660c874dbb8f7240112111283f6",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/14979/pg14979.rdf",
+          "rdfSha256": "e38f2af6a1a9f07908f3205f8ab7868cded1e06731769b64f7bbf7e705485a36",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:15827",
+          "title": "The Great Round World and What Is Going On In It, Vol. 1, No. 34, July 1, 1897\nA Weekly Magazine for Boys and Girls",
+          "gutenbergId": "15827",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/15827/pg15827.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/15827",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/15827/pg15827.cover.medium.jpg",
+          "coverSha256": "fb5af50a2ec9e018a393b9069530ad90ec8c9d98721ac7643287226089503363",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/15827/pg15827.rdf",
+          "rdfSha256": "9d1fa66eb3bed744ab48ca1d4a37c8b7f4348473cc92bfa0a1c5bd7e00582c02",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "4ced79f67be97402e12481d8d7f698138634180bc3a05dc577e2d31147711f19"
+    },
+    {
+      "id": "gutenberg:Language & Communication",
+      "label": "Language & Communication",
+      "image": "gutenberg-language-communication.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:9078",
+          "title": "Sanders' Union Fourth Reader\r\nEmbracing a Full Exposition of the Principles of Rhetorical Reading; with Numerous Exercises for Practice, Both in Prose and Poetry, Various in Style, and Carefully Adapted to the Purposes of Teaching in Schools of Every Grade",
+          "gutenbergId": "9078",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/9078/pg9078.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/9078",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/9078/pg9078.cover.medium.jpg",
+          "coverSha256": "85cda7deb6331088f9a44f634d587a39888c72e0c352b3c031e349eaf2b159aa",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/9078/pg9078.rdf",
+          "rdfSha256": "f5600bedf0dc27f6c0c89fe020b353a4768a097d7b091fcd3e41b458609d6945",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:10681",
+          "title": "Roget's Thesaurus of English Words and Phrases",
+          "gutenbergId": "10681",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/10681/pg10681.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/10681",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/10681/pg10681.cover.medium.jpg",
+          "coverSha256": "621c02c2ffb5ff1d00c738565ea38ea58023ea1062a558eede57be3c37848314",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/10681/pg10681.rdf",
+          "rdfSha256": "017c4278ad1155c83b26c38c5bd10f993d5368c76d79e1d10a09aa30a54018e9",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "44fce9b0a636b85147f417df88830f28eb376a41d55ffa090cbe33db480098df"
+    },
+    {
+      "id": "gutenberg:Law & Criminology",
+      "label": "Law & Criminology",
+      "image": "gutenberg-law-criminology.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2",
+          "title": "The United States Bill of Rights\r\nThe Ten Original Amendments to the Constitution of the United States",
+          "gutenbergId": "2",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2/pg2.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2/pg2.cover.medium.jpg",
+          "coverSha256": "3b29cf5cd53879439d5326788ac987a2b6be34497911585d54b3dc5576d350a4",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2/pg2.rdf",
+          "rdfSha256": "5462911e6f691b5ee9f22f24a0ac789706217fb3d54a59325ef1a626a174663b",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:5",
+          "title": "The United States Constitution",
+          "gutenbergId": "5",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/5/pg5.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/5",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/5/pg5.cover.medium.jpg",
+          "coverSha256": "0006988727cd0a8fbc703afdd9fcb2cf49d3f00eee1e4a7da0a0b71dbb08d509",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/5/pg5.rdf",
+          "rdfSha256": "404fb6142c45c0913ac5bec86009454ee7235ad872ef668735e19bfa8df10e7a",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "b46775e4aef20f40d178d41e6dbf28f3c7a9cb3cdd521d6fb4049d43652509c6"
+    },
+    {
+      "id": "gutenberg:Literature - Other",
+      "label": "Literature - Other",
+      "image": "gutenberg-literature-other.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:5932",
+          "title": "The History of Don Quixote, Volume 2, Part 29",
+          "gutenbergId": "5932",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/5932/pg5932.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/5932",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/5932/pg5932.cover.medium.jpg",
+          "coverSha256": "fd48a53cf53a22f9c6f86dcb9ca6242abed79a7bd133b9e991462b51ce062ee1",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/5932/pg5932.rdf",
+          "rdfSha256": "f124d7ef5763216c52efe88e81d020950183f6f61f0d72bc2300962ddfd08250",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:22129",
+          "title": "\"Wee Tim'rous Beasties\": Studies of Animal life and Character",
+          "gutenbergId": "22129",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/22129/pg22129.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/22129",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/22129/pg22129.cover.medium.jpg",
+          "coverSha256": "6387b1a002e4072d34b2d2503b62eeb053300999c7ef2552b333db0226abbc80",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/22129/pg22129.rdf",
+          "rdfSha256": "af2b4f45b0e5a547194f55e91c82c1747a281477f3466ebdfc842d6784289444",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "1a25fbaa6b9d881be77800ced38b6446d0da9804211aa19a5fa70cd1c4119569"
+    },
+    {
+      "id": "gutenberg:Mathematics",
+      "label": "Mathematics",
+      "image": "gutenberg-mathematics.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:22062",
+          "title": "The Mathematicall Praeface to Elements of Geometrie of Euclid of Megara",
+          "gutenbergId": "22062",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/22062/pg22062.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/22062",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/22062/pg22062.cover.medium.jpg",
+          "coverSha256": "daf09041cd8cc6caec86289de477401634714bab1b839d11fb9624afb42d5c1a",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/22062/pg22062.rdf",
+          "rdfSha256": "b930e35f162d3cc4243e93e7ec1aa4d589bba12fcd045ba3e64f2962eafbaef7",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:27936",
+          "title": "Histoire des nombres et de la numération mécanique",
+          "gutenbergId": "27936",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/27936/pg27936.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/27936",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/27936/pg27936.cover.medium.jpg",
+          "coverSha256": "55a690929f6d23f54974ef30f3481ebadd0fba139542ffa6477b91f510323333",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/27936/pg27936.rdf",
+          "rdfSha256": "14cc09058fc3f2262ca88a692006c975ec11354e46a44e920d362c7367b1d2d4",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "cc0f5fe4c0b88a63eb50bb34adec010a7926a714aa7b91ae29e6c978cb298599"
+    },
+    {
+      "id": "gutenberg:Music",
+      "label": "Music",
+      "image": "gutenberg-music.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:3148",
+          "title": "A Village Stradivarius",
+          "gutenbergId": "3148",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/3148/pg3148.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/3148",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/3148/pg3148.cover.medium.jpg",
+          "coverSha256": "6c79d3643566c7e8923176f88888a498b455d9f543f2e8a5500fedbe34fac091",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/3148/pg3148.rdf",
+          "rdfSha256": "30a866fc684f95e3c3d6f76f34b3f643f8c697a6474c01813ab6d15d75e1626f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:5144",
+          "title": "My Life — Volume 2",
+          "gutenbergId": "5144",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/5144/pg5144.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/5144",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/5144/pg5144.cover.medium.jpg",
+          "coverSha256": "0ebd0a599a3904c58ffbc3dbdf9dff81e25ed08f3fbe8b8ba4875f3cc3547863",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/5144/pg5144.rdf",
+          "rdfSha256": "5b60513bedeb81a57d2e2eff6fe96d613f8e1dfeee9331199c038b2f78853cc7",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "7d12652d14cd9d53ecc1d9709cda79f4ef7194102cbf8b9b8041f06c0f04f288"
+    },
+    {
+      "id": "gutenberg:Mythology, Legends & Folklore",
+      "label": "Mythology, Legends & Folklore",
+      "image": "gutenberg-mythology-legends-folklore.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:17",
+          "title": "The Book of Mormon",
+          "gutenbergId": "17",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/17/pg17.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/17",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/17/pg17.cover.medium.jpg",
+          "coverSha256": "524f785cc7678489d062a5a51e592c72447a27b70197b3ec0b9fde46cec09317",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/17/pg17.rdf",
+          "rdfSha256": "af0b423b636b472520a9df51faa8bf787feba62423470079c0607039bce6b4ba",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:19",
+          "title": "The Song of Hiawatha",
+          "gutenbergId": "19",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/19/pg19.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/19",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/19/pg19.cover.medium.jpg",
+          "coverSha256": "140aa9b34ae077524e629817f43312918f61478df0c33796827f3644ddc04ff9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/19/pg19.rdf",
+          "rdfSha256": "67676282b237138b41c845ae3ddd09bda8c481a9ba7b298a828033c54350b618",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "94e754311ec7b9c295a4434f354f486df266664e7226051e62ba65c43688764c"
+    },
+    {
+      "id": "gutenberg:Nature/Gardening/Animals",
+      "label": "Nature/Gardening/Animals",
+      "image": "gutenberg-nature-gardening-animals.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:326",
+          "title": "Steep Trails",
+          "gutenbergId": "326",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/326/pg326.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/326",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/326/pg326.cover.medium.jpg",
+          "coverSha256": "9d9cf94ce35e60588fb6ecf82cfdb573d3f202b1bbb8907188b77df8a6c3dfe5",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/326/pg326.rdf",
+          "rdfSha256": "95aa45fd74640c4e13c4ccc91d87c3a9671a9c1db1597b7eab9effc371b0c6e0",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:695",
+          "title": "Glaucus; Or, The Wonders of the Shore",
+          "gutenbergId": "695",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/695/pg695.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/695",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/695/pg695.cover.medium.jpg",
+          "coverSha256": "feec5f5821bce16fefecf115f7e3ab0bdb9c27123923d5ed11330a0725e12f0f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/695/pg695.rdf",
+          "rdfSha256": "3d24e688e2df16cc7af3482a6c11e610030faf2a10d3ca17ec31000c75131fa6",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "725490a52327ff049bf11c5a23fcda439beb3cab11b4633917b6b878d7a5ac37"
+    },
+    {
+      "id": "gutenberg:Novels",
+      "label": "Novels",
+      "image": "gutenberg-novels.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:11",
+          "title": "Alice's Adventures in Wonderland",
+          "gutenbergId": "11",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/11/pg11.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/11",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/11/pg11.cover.medium.jpg",
+          "coverSha256": "26c0f2914dad0940bd10ce37267bfbea9a2b301775a6d3efd9ed993762e5a944",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/11/pg11.rdf",
+          "rdfSha256": "307c976d557021ac465a7cbc22b5c727fa6afdbd67786872b78e0745e2df134b",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:12",
+          "title": "Through the Looking-Glass",
+          "gutenbergId": "12",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/12/pg12.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/12",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/12/pg12.cover.medium.jpg",
+          "coverSha256": "871c199ca02056c8a65dce374b7274805255e0b18568a5ab3dc68fdd8a26080d",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/12/pg12.rdf",
+          "rdfSha256": "d97194f36c2900915c250c99afed01fd5ff79af8556386f6a21c234dfed2c18c",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "1b6543235b2962765388bddb8e358aa51d3975b7b2bdaa6d640e4c0cdabaa710"
+    },
+    {
+      "id": "gutenberg:Nutrition",
+      "label": "Nutrition",
+      "image": "gutenberg-nutrition.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:12238",
+          "title": "Science in the Kitchen\r\nA Scientific Treatise On Food Substances and Their Dietetic Properties, Together with a Practical Explanation of the Principles of Healthful Cookery, and a Large Number of Original, Palatable, and Wholesome Recipes",
+          "gutenbergId": "12238",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/12238/pg12238.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/12238",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/12238/pg12238.cover.medium.jpg",
+          "coverSha256": "5c28fd2a9d14335c16b31a87236bfc8debe26b0747deb860b99ea9b8cd8ed68f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/12238/pg12238.rdf",
+          "rdfSha256": "0b59ac2f86997295e98168c9a5c54ef12a24ffef6c6fa07087869b33aef6a674",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:16977",
+          "title": "Food and Health",
+          "gutenbergId": "16977",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/16977/pg16977.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/16977",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/16977/pg16977.cover.medium.jpg",
+          "coverSha256": "82670035ccaf62a70b4b5faf15f6d2f3a6720fb51b82b99bc034c4c1059b8502",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/16977/pg16977.rdf",
+          "rdfSha256": "798f45a267db2aa88f718cf84d159f2076d84927a2b092a563602fbcf5965690",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "27158a4138292fcdab6be730c9bd0a2377ab92847a5b6de86047ba222aea4bd0"
+    },
+    {
+      "id": "gutenberg:Old Age & the Elderly",
+      "label": "Old Age & the Elderly",
+      "image": "gutenberg-old-age-the-elderly.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:32805",
+          "title": "The Impossible Voyage Home",
+          "gutenbergId": "32805",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/32805/pg32805.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/32805",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/32805/pg32805.cover.medium.jpg",
+          "coverSha256": "7aa57d14af4cbb9149b7517fb4f928a9380bda50b343bc2861e38f7e0983d9a5",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/32805/pg32805.rdf",
+          "rdfSha256": "a2d8995fa3ea0037ac0da8c0f0165ab78dc29c490ba9ae8add4174dd50b1dc54",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:40545",
+          "title": "The Splendid Fairing",
+          "gutenbergId": "40545",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/40545/pg40545.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/40545",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/40545/pg40545.cover.medium.jpg",
+          "coverSha256": "433f1ce512cdfea893777796308298f100b957b6cc8bcb8a29de0c83cb11ff00",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/40545/pg40545.rdf",
+          "rdfSha256": "df57493f5ed5aa459aff81afde3d33e5d18710d583b44d3fb78d7e319020ecca",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "66d3dd6b10fff0e6c950f084f11ae0fa9d3703bb39215ed3ffa7808ae0770700"
+    },
+    {
+      "id": "gutenberg:Parenthood & Family Relations",
+      "label": "Parenthood & Family Relations",
+      "image": "gutenberg-parenthood-family-relations.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2140",
+          "title": "Extracts from the Diary of William Bray",
+          "gutenbergId": "2140",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2140/pg2140.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2140",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2140/pg2140.cover.medium.jpg",
+          "coverSha256": "4b8d7d83e6581d6efabd046ddf7c6f5b407f7752c817c0ad6f679db0a147d6a6",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2140/pg2140.rdf",
+          "rdfSha256": "d73e530bdeb4ea3d385cdb1d5947e475af9d95e45f284f847ffd0aa3366ecc53",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:7575",
+          "title": "Widger's Quotes and Images from Monsieur, Madame, and Bébé by Gustave Droz\r\nThe French Immortals: Quotes and Images",
+          "gutenbergId": "7575",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/7575/pg7575.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/7575",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/7575/pg7575.cover.medium.jpg",
+          "coverSha256": "6d91d7fac6beea2d05f4006c90d78bc56209f75a4e7f413116b1bf4882db55da",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/7575/pg7575.rdf",
+          "rdfSha256": "6a107d0832f7e4c497fc3af40ac1ac51f3149a6f9396f9fb9162a0d660f2169d",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "22c1acc01cde3f8b9eb48c19e61331f3b26afef7dc17f03f2871660cd63a8e7d"
+    },
+    {
+      "id": "gutenberg:Philosophy & Ethics",
+      "label": "Philosophy & Ethics",
+      "image": "gutenberg-philosophy-ethics.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1998",
+          "title": "Thus Spake Zarathustra: A Book for All and None",
+          "gutenbergId": "1998",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1998/pg1998.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1998",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1998/pg1998.cover.medium.jpg",
+          "coverSha256": "8bddb7f3dd081fa3bd8647f1dbe80150060423b8efa7de423a979f927d6c0da3",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1998/pg1998.rdf",
+          "rdfSha256": "f9266d3788306270ec8bf4148ef0534f5a54a43b6ea67fc13e17fef0c61be9ba",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1497",
+          "title": "The Republic",
+          "gutenbergId": "1497",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1497/pg1497.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1497",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1497/pg1497.cover.medium.jpg",
+          "coverSha256": "384830b7cc6e980b4c83274e9b64c891ccb0d411529cc6f2cb8c77ceb1b42c8f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1497/pg1497.rdf",
+          "rdfSha256": "68a1d214406f8cec9b646e0498a8f3364e7597813cb9a8aa298e781f36d2c66b",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "58651dcb77a1961ff5bca3e770845cdbb632971064f9b113245d298988ed31c2"
+    },
+    {
+      "id": "gutenberg:Plays/Films/Dramas",
+      "label": "Plays/Films/Dramas",
+      "image": "gutenberg-plays-films-dramas.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:31",
+          "title": "Plays of Sophocles: Oedipus the King; Oedipus at Colonus; Antigone",
+          "gutenbergId": "31",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/31/pg31.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/31",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/31/pg31.cover.medium.jpg",
+          "coverSha256": "c2dfd7616eaeb31ec3cfab21460eae4aa74ff53178b227c7a6eb240b28d08169",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/31/pg31.rdf",
+          "rdfSha256": "c27ed3f9fd1a5df47cda4b3499570ff64f941d71cf604ba678e747f8ccc690d4",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:100",
+          "title": "The Complete Works of William Shakespeare",
+          "gutenbergId": "100",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/100/pg100.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/100",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/100/pg100.cover.medium.jpg",
+          "coverSha256": "05c70f94892771e2778dc6cdf9e48c17046c898fcad762c8763453b4ba1a557d",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/100/pg100.rdf",
+          "rdfSha256": "97dd8923100e3e1cbcd16741a709e61261100160c77d8f488530ec84593b60b6",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "012449db0273b31b5ba200c04c332f2d9a5322cd7c9de6b4ca4da36c82251b47"
+    },
+    {
+      "id": "gutenberg:Poetry",
+      "label": "Poetry",
+      "image": "gutenberg-poetry.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:16328",
+          "title": "Beowulf: An Anglo-Saxon Epic Poem",
+          "gutenbergId": "16328",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/16328/pg16328.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/16328",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/16328/pg16328.cover.medium.jpg",
+          "coverSha256": "152ce7c507d5a4b596fb6810cfcb58707ca7aab4c549e22e3601bb69f023aebf",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/16328/pg16328.rdf",
+          "rdfSha256": "c3382faf146c6ebbb6ca0d113c8f053930d99a18f5fdf0c8167994acaf5cd39e",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1322",
+          "title": "Leaves of Grass",
+          "gutenbergId": "1322",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1322/pg1322.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1322",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1322/pg1322.cover.medium.jpg",
+          "coverSha256": "fc3f45681974c7971206fb9781c450f708bf94dcdd561a0386f40e26fbf4a0f0",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1322/pg1322.rdf",
+          "rdfSha256": "944a82369a374d139005f75846456dd205d5245c57fa75a233b9c07af00df32b",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "73abe41d46365645ad6a009f6f85faa71bf0d2d2fd30e8913296bba694c88388"
+    },
+    {
+      "id": "gutenberg:Politics",
+      "label": "Politics",
+      "image": "gutenberg-politics.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1",
+          "title": "The Declaration of Independence of the United States of America",
+          "gutenbergId": "1",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1/pg1.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.cover.medium.jpg",
+          "coverSha256": "7e59773ff55855b3d74aa1205a6c75335a9442272507043372d5dde33a61a8e9",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1/pg1.rdf",
+          "rdfSha256": "2ab3a71d0382eb59ee70125d6301365c6ad17528d917725a00453f70c57a151f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:3",
+          "title": "John F. Kennedy's Inaugural Address",
+          "gutenbergId": "3",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/3/pg3.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/3",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/3/pg3.cover.medium.jpg",
+          "coverSha256": "951388e2066cdd48ea1e6041e4cd18f5880845a2daddc736b28cbd405c236260",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/3/pg3.rdf",
+          "rdfSha256": "f5552515536825f54087586d8442135b4c04b53ba950a61cf98c6178572976a1",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "ec16b3e6872260833795935b665801ad77011cb360e738f1c96eb259ec4c8aed"
+    },
+    {
+      "id": "gutenberg:Psychiatry/Psychology",
+      "label": "Psychiatry/Psychology",
+      "image": "gutenberg-psychiatry-psychology.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:621",
+          "title": "The Varieties of Religious Experience: A Study in Human Nature",
+          "gutenbergId": "621",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/621/pg621.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/621",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/621/pg621.cover.medium.jpg",
+          "coverSha256": "c77e06684a1a4dcc8fc013964808f62f87c45cbae48b1bc9448abed3618b7cfc",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/621/pg621.rdf",
+          "rdfSha256": "bddbe944752e3df490fe4289c004fb6ac77f39941da358804f69bee4b92d7e0f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1320",
+          "title": "Criminal Psychology: A Manual for Judges, Practitioners, and Students",
+          "gutenbergId": "1320",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1320/pg1320.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1320",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1320/pg1320.cover.medium.jpg",
+          "coverSha256": "1c87cc39d10ecbe8e0816c9cbebec74226eec56d477b5cbd5bf1f1237c68e8a4",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1320/pg1320.rdf",
+          "rdfSha256": "dc55e93adc3a804020573dd3c183d8acfd25e4bfe1caf853c7b803dcd7ac4391",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "96f1f5e4caf1e2ecde0ded58c7050da1b1a4edc6c4a13fbdb494646eea6dd498"
+    },
+    {
+      "id": "gutenberg:Religion/Spirituality",
+      "label": "Religion/Spirituality",
+      "image": "gutenberg-religion-spirituality.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:10",
+          "title": "The King James Version of the Bible",
+          "gutenbergId": "10",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/10/pg10.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/10",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/10/pg10.cover.medium.jpg",
+          "coverSha256": "4dd51f488498f574ecb0f9df428f5d6d8876ebf87cbea348da5b10e25e672b2f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/10/pg10.rdf",
+          "rdfSha256": "69682c4ac022328712fa2c99e989977921c92f2bdf098390a1d3af1109be2ae9",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:17",
+          "title": "The Book of Mormon",
+          "gutenbergId": "17",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/17/pg17.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/17",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/17/pg17.cover.medium.jpg",
+          "coverSha256": "524f785cc7678489d062a5a51e592c72447a27b70197b3ec0b9fde46cec09317",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/17/pg17.rdf",
+          "rdfSha256": "af0b423b636b472520a9df51faa8bf787feba62423470079c0607039bce6b4ba",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "64fa03b2e22721ab2fea8f2306f66a22de108816c277bf295748c66709a0d121"
+    },
+    {
+      "id": "gutenberg:Reports & Conference Proceedings",
+      "label": "Reports & Conference Proceedings",
+      "image": "gutenberg-reports-conference-proceedings.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:29",
+          "title": "The 1990 United States Census [incomplete]",
+          "gutenbergId": "29",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/29/pg29.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/29",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/29/pg29.cover.medium.jpg",
+          "coverSha256": "4e94df89acd99c9480010ec84968d8993794e13c3bb625f66d6221a7022d1f73",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/29/pg29.rdf",
+          "rdfSha256": "03a652df94f0251d04d604c1301f34ed2dc3a32fda421a6ffd249ef5a181a07d",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:37",
+          "title": "The 1990 United States Census",
+          "gutenbergId": "37",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/37/pg37.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/37",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/37/pg37.cover.medium.jpg",
+          "coverSha256": "9ad6d6731ecf3a2a6f28fb2964485c47b859b02968d6089d17eabf3213724d56",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/37/pg37.rdf",
+          "rdfSha256": "0115820cede8c6a657448fcbde73ab89edfbcf0893461d7167e4533ce634c6a0",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "e3acdb660bf1214b0d0f4ef2bc9dabf25eb9523f8655bd055c0a29a5d9c57a70"
+    },
+    {
+      "id": "gutenberg:Research Methods/Statistics/Information Sys",
+      "label": "Research Methods/Statistics/Information Sys",
+      "image": "gutenberg-research-methods-statistics-information-sys.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:47296",
+          "title": "The Popular Science Monthly, October, 1900\nVol. 57, May, 1900 to October, 1900",
+          "gutenbergId": "47296",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/47296/pg47296.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/47296",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/47296/pg47296.cover.medium.jpg",
+          "coverSha256": "48e25dfd74e6cbe76af5bdca72de9390fef472d886d32cd03819a0043b1b88e1",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/47296/pg47296.rdf",
+          "rdfSha256": "d099fe049fba0d731609f3f7f1c780f650709cdb160096ba5174239f770ff4e2",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:54609",
+          "title": "The Ohio Journal of Science, Vol. XVI, No. 1, November 1915",
+          "gutenbergId": "54609",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/54609/pg54609.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/54609",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/54609/pg54609.cover.medium.jpg",
+          "coverSha256": "8c7f8de94925b5bc954531338c5025540eb007cb4957555152b83e1953687a15",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/54609/pg54609.rdf",
+          "rdfSha256": "9a358fe50c7abf619765930358f2d79d18332b2f7859c7ab054205c7ec9f3e07",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "3d4f7d6cec056afaf454ffba649d394b323954a1bf43ca2bf9ed2de216086a05"
+    },
+    {
+      "id": "gutenberg:Romance",
+      "label": "Romance",
+      "image": "gutenberg-romance.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:1342",
+          "title": "Pride and Prejudice",
+          "gutenbergId": "1342",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1342",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1342/pg1342.cover.medium.jpg",
+          "coverSha256": "09dac7bcaad56ad2229588acb9fc97ed32a4cf91da98677210f7de8800170091",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1342/pg1342.rdf",
+          "rdfSha256": "fc020ca4305b1f30790c3e55eed07f788b79f6868a4615c08a22b5398c818987",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1260",
+          "title": "Jane Eyre: An Autobiography",
+          "gutenbergId": "1260",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1260/pg1260.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1260",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1260/pg1260.cover.medium.jpg",
+          "coverSha256": "c9ce900d6afdf5d94024ebce601cc96522e8b0bb14e930e2fe3b4b351b032014",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1260/pg1260.rdf",
+          "rdfSha256": "ba071f206158320574f6b06b0620922659efa6eeffa0dfcc981b6dfacbe33b4b",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "d9d641b212011c4e30855f19969e4476805cc20e92c3a3d151b55476468397fe"
+    },
+    {
+      "id": "gutenberg:Russian Literature",
+      "label": "Russian Literature",
+      "image": "gutenberg-russian-literature.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:600",
+          "title": "Notes from the Underground",
+          "gutenbergId": "600",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/600/pg600.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/600",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/600/pg600.cover.medium.jpg",
+          "coverSha256": "391d9c8e9c992b74ba40c5686b3591b391848e31870f6c377277fba1b2f1651e",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/600/pg600.rdf",
+          "rdfSha256": "9a9b82ce6423e7e682bff6e10d52f446a204dded6d8ffe0512522ffd17df2548",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:689",
+          "title": "The Kreutzer Sonata and Other Stories",
+          "gutenbergId": "689",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/689/pg689.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/689",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/689/pg689.cover.medium.jpg",
+          "coverSha256": "b27288b8667e1b8e68d4dbb7ae35493ac80bb6d02bd7c7c8b11ce63cb290307e",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/689/pg689.rdf",
+          "rdfSha256": "668ad08fbf5714a4250a0ca8b88092c4bff462e35ea68a50d4613d28df57910c",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "625d4ed16e9e85495b78cadfdfb2ca32d3e4f4c1aada3ff4f96528625ca5e616"
+    },
+    {
+      "id": "gutenberg:Science - Biology",
+      "label": "Science - Biology",
+      "image": "gutenberg-science-biology.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:695",
+          "title": "Glaucus; Or, The Wonders of the Shore",
+          "gutenbergId": "695",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/695/pg695.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/695",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/695/pg695.cover.medium.jpg",
+          "coverSha256": "feec5f5821bce16fefecf115f7e3ab0bdb9c27123923d5ed11330a0725e12f0f",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/695/pg695.rdf",
+          "rdfSha256": "3d24e688e2df16cc7af3482a6c11e610030faf2a10d3ca17ec31000c75131fa6",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:1228",
+          "title": "On the Origin of Species By Means of Natural Selection\r\nOr, the Preservation of Favoured Races in the Struggle for Life",
+          "gutenbergId": "1228",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/1228/pg1228.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/1228",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/1228/pg1228.cover.medium.jpg",
+          "coverSha256": "3373f68410d8b45a5b79f1962c8f591add19e3f3fd2bf137a2a9a5066fdbf3ed",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/1228/pg1228.rdf",
+          "rdfSha256": "d64da107b1aa16be27463f436b66b5814a0614d26f4d27828f21800c2fc1d7ab",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "a0428576bf16b945d784e0474a9aca5a8712654feb7a638d5702815097abadfb"
+    },
+    {
+      "id": "gutenberg:Science - Chemistry/Biochemistry",
+      "label": "Science - Chemistry/Biochemistry",
+      "image": "gutenberg-science-chemistry-biochemistry.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:14474",
+          "title": "The Chemical History of a Candle",
+          "gutenbergId": "14474",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/14474/pg14474.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/14474",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/14474/pg14474.cover.medium.jpg",
+          "coverSha256": "f6bf71f309887bf92b7efa34e5573dc4115dd812bc5ab4dc8fc59dd95ebe39b4",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/14474/pg14474.rdf",
+          "rdfSha256": "dd31a413df96873b3ce26ca1aa402c3bac2cc454503dc3ab7bdf76c777240af7",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:22914",
+          "title": "The Sceptical Chymist\nor Chymico-Physical Doubts & Paradoxes, Touching the Spagyrist's Principles Commonly call'd Hypostatical; As they are wont to be Propos'd and Defended by the Generality of Alchymists. Whereunto is præmis'd Part of another Discourse relating to the same Subject.",
+          "gutenbergId": "22914",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/22914/pg22914.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/22914",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/22914/pg22914.cover.medium.jpg",
+          "coverSha256": "4dd1e8675a78aec94a75343968955ba29b8a20929202e5d45e81939784c6606c",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/22914/pg22914.rdf",
+          "rdfSha256": "b54f60ef3db96b0475b7bffc302274296a86bafbb373e80fa920cc3316aa27fc",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "6135d4a6892561663ec5a300ffe81d79ecd3bf62d961d71c1a0e7723400ddeb0"
+    },
+    {
+      "id": "gutenberg:Science - Earth/Agricultural/Farming",
+      "label": "Science - Earth/Agricultural/Farming",
+      "image": "gutenberg-science-earth-agricultural-farming.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:2355",
+          "title": "The Formation of Vegetable Mould Through the Action of Worms\r\nWith Observations on Their Habits",
+          "gutenbergId": "2355",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2355/pg2355.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2355",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2355/pg2355.cover.medium.jpg",
+          "coverSha256": "2084d96db3e872420f3371cdfa58a015970aacced35d7536293ee4f347b21590",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2355/pg2355.rdf",
+          "rdfSha256": "3cfc2178713cffeb5210dd215f570b69286e7964e5bb7e73a768cd85e16d0c4f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:2485",
+          "title": "The Movements and Habits of Climbing Plants",
+          "gutenbergId": "2485",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/2485/pg2485.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/2485",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/2485/pg2485.cover.medium.jpg",
+          "coverSha256": "f78301e6bdfefaea5f50c7a46414a747ee008c862b841d353c5bd50e4f46b0c8",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/2485/pg2485.rdf",
+          "rdfSha256": "b01800eae2d6ab9583158de974a7d5f2add5eb6acbae3b31b1c8ecc06ce3d6cd",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "5767f97cf3d39d587c07ab5da9713859f72a57d0a3a194e927c8651fafd190cf"
+    },
+    {
+      "id": "gutenberg:Science - Physics",
+      "label": "Science - Physics",
+      "image": "gutenberg-science-physics.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:6630",
+          "title": "Curiosities of the Sky",
+          "gutenbergId": "6630",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/6630/pg6630.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/6630",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/6630/pg6630.cover.medium.jpg",
+          "coverSha256": "0a87ae53d0e52266249878d4d5a54bf391d7dbe640c2c0192e0adaed938f6428",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/6630/pg6630.rdf",
+          "rdfSha256": "b09d0c530b384c60864749d68d10d7a476e4c31cc8af29ccb2712a5b06dca12a",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:14986",
+          "title": "Experimental Researches in Electricity, Volume 1",
+          "gutenbergId": "14986",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/14986/pg14986.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/14986",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/14986/pg14986.cover.medium.jpg",
+          "coverSha256": "d94b9fa3aa3aa4bb4ce5f1e5e4241b471d53d509b075bc20bcddb5029d400d4c",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/14986/pg14986.rdf",
+          "rdfSha256": "4c9ac51a60c788940b4dc340dab800953e82c4293a97fa0cb0a89273d03ce0e7",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "bea21538523623cda176f6178e270bbe359ff42dbc9056528b9dcee01b68584a"
+    },
+    {
+      "id": "gutenberg:Science-Fiction & Fantasy",
+      "label": "Science-Fiction & Fantasy",
+      "image": "gutenberg-science-fiction-fantasy.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:36",
+          "title": "The war of the worlds",
+          "gutenbergId": "36",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/36/pg36.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/36",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/36/pg36.cover.medium.jpg",
+          "coverSha256": "d052f1203a006b6e68d5cc51fd326f668698b91676091d3b4946fc6e9ce5bbbf",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/36/pg36.rdf",
+          "rdfSha256": "2be6c17ec949030863fa860158f4757dd7fa7a80e13ff7cf197e47fea708083f",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:35",
+          "title": "The Time Machine",
+          "gutenbergId": "35",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/35/pg35.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/35",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/35/pg35.cover.medium.jpg",
+          "coverSha256": "7e1b100da229949335b2516179e1a32b0b004aee5e50a22b4a544961650ea6c5",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/35/pg35.rdf",
+          "rdfSha256": "db575f729781f2ad9ce771529a900b78530e70a13f822b722fb5438959b61f8f",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "9f67420d059ee648eb24c17c8b70e508f0071e3ea2d30e3ddadeaf91e52967d1"
+    },
+    {
+      "id": "gutenberg:Sexuality & Erotica",
+      "label": "Sexuality & Erotica",
+      "image": "gutenberg-sexuality-erotica.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:18370",
+          "title": "Manhood Perfectly Restored\r\nProf. Jean Civiale's Soluble Urethral Crayons as a Quick, Painless, and Certain Cure for Impotence, Etc.",
+          "gutenbergId": "18370",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/18370/pg18370.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/18370",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/18370/pg18370.cover.medium.jpg",
+          "coverSha256": "11879fa321d6f3c7a83f36eef859aa51108243b003ccc18e9343fb73113e4bae",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/18370/pg18370.rdf",
+          "rdfSha256": "b45921fa8c5cd2c7f5ddde40469fffb95ea04f1210706d965a76ba0595595cc9",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:23238",
+          "title": "Sexueele Zeden in Woord en Beeld: Liefde en Zinnelijkheid",
+          "gutenbergId": "23238",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/23238/pg23238.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/23238",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/23238/pg23238.cover.medium.jpg",
+          "coverSha256": "f9f5e044fd9317fd9a6ac0dbcb9546ed084314b46081ed9369281f8858170ff0",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/23238/pg23238.rdf",
+          "rdfSha256": "ef7dbb3bf3f634d87667af68e90decf33616ff13688d0bf01a96c8320698196c",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "c5fc2152aabd5cca17d5a15c8c0b8eec3495fdafb6ad8233f6e1f485e57f1ce8"
+    },
+    {
+      "id": "gutenberg:Short Stories",
+      "label": "Short Stories",
+      "image": "gutenberg-short-stories.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:28",
+          "title": "The Fables of Aesop\r\nSelected, Told Anew, and Their History Traced",
+          "gutenbergId": "28",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/28/pg28.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/28",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/28/pg28.cover.medium.jpg",
+          "coverSha256": "0266e7df4c09458516e76fd941e5eaedaae6102ddf9c3251279e517b3557383a",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/28/pg28.rdf",
+          "rdfSha256": "f00b7cc1564a389d08035e3cfbe58636e016780d02a2e16687b77588e4ad33e8",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:41",
+          "title": "The Legend of Sleepy Hollow",
+          "gutenbergId": "41",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/41/pg41.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/41",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/41/pg41.cover.medium.jpg",
+          "coverSha256": "88d3b0307a0c5917b0f0c2622c1dfe70fa616e387aeff66186f7acb960989430",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/41/pg41.rdf",
+          "rdfSha256": "a16269b69cb1bd62597e0ed5e6f3e7329c2d9344f4c8251c2f32947c0f2b59e5",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "1299d4a5e01443a8659ceb35d6cf56f7eb077b77434425ba1b7a2c1b4869bff6"
+    },
+    {
+      "id": "gutenberg:Sociology",
+      "label": "Sociology",
+      "image": "gutenberg-sociology.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:29",
+          "title": "The 1990 United States Census [incomplete]",
+          "gutenbergId": "29",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/29/pg29.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/29",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/29/pg29.cover.medium.jpg",
+          "coverSha256": "4e94df89acd99c9480010ec84968d8993794e13c3bb625f66d6221a7022d1f73",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/29/pg29.rdf",
+          "rdfSha256": "03a652df94f0251d04d604c1301f34ed2dc3a32fda421a6ffd249ef5a181a07d",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:408",
+          "title": "The Souls of Black Folk",
+          "gutenbergId": "408",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/408/pg408.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/408",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/408/pg408.cover.medium.jpg",
+          "coverSha256": "d436e9b39b17efa1c3132db730e3c0d0e821bdf49d4855a5e0fab1afb30b80f2",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/408/pg408.rdf",
+          "rdfSha256": "bf64ce5f15501cc001ea84a704fa107e9a1312c8bc306fd7c04161ccdca2a870",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "5551fc0d86c1cde44537e18e0bb4ea3acb2252e2ca6ed2a38dff9f57c4eaa0d4"
+    },
+    {
+      "id": "gutenberg:Sports/Hobbies",
+      "label": "Sports/Hobbies",
+      "image": "gutenberg-sports-hobbies.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:5614",
+          "title": "Chess Strategy",
+          "gutenbergId": "5614",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/5614/pg5614.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/5614",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/5614/pg5614.cover.medium.jpg",
+          "coverSha256": "2fec56d95599ad15ae79dbfea97b4f332bb11c50c99ef1294277c4d3a7a82f01",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/5614/pg5614.rdf",
+          "rdfSha256": "42767e2f8de9e9cc3255a9543e24c1c4d4686a866e3decdc47130f095d105057",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:12655",
+          "title": "The Boy Mechanic, Volume 1: 700 Things for Boys to Do",
+          "gutenbergId": "12655",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/12655/pg12655.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/12655",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/12655/pg12655.cover.medium.jpg",
+          "coverSha256": "6309aaa8335376c68ee5fbebaef4d8968e659b8e4199ea7bfbe6dd672a6369a5",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/12655/pg12655.rdf",
+          "rdfSha256": "ff9aba1c200b48baee66eb34852e1e55c3280f88591fef374be100c616b90aa0",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "74b4b7dae74887a7721fed2c3711d97daaf881fb2070d608bd25b344da5dd401"
+    },
+    {
+      "id": "gutenberg:Teaching & Education",
+      "label": "Teaching & Education",
+      "image": "gutenberg-teaching-education.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:3278",
+          "title": "Cambridge Pieces",
+          "gutenbergId": "3278",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/3278/pg3278.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/3278",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/3278/pg3278.cover.medium.jpg",
+          "coverSha256": "de3444fde359455f9543e2781bbd4a6e71418e47c0a5b31f2a11c1ddc9270651",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/3278/pg3278.rdf",
+          "rdfSha256": "e6cb3dfa29a6c5733964b7b98faa7621bf46edbd3c94db1256c1364a01635996",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:4087",
+          "title": "An Essay Upon Projects",
+          "gutenbergId": "4087",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/4087/pg4087.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/4087",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/4087/pg4087.cover.medium.jpg",
+          "coverSha256": "5eb43604cb3b2c01954db10fecfac5246b09cff8c8a878babd87ee84ff245b16",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/4087/pg4087.rdf",
+          "rdfSha256": "a43e69d71c18113194dddf00bf1067a10688bc6e0a6fb871efcaa9442ba59eba",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "7e6c92e031978e331ef391d045978967bbf0533a94ac7943f2770f4a8c4f42c0"
+    },
+    {
+      "id": "gutenberg:Travel Writing",
+      "label": "Travel Writing",
+      "image": "gutenberg-travel-writing.png",
+      "covers": [
+        {
+          "bookId": "gutenberg:119",
+          "title": "A Tramp Abroad",
+          "gutenbergId": "119",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/119/pg119.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/119",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/119/pg119.cover.medium.jpg",
+          "coverSha256": "ab588ec9a5b95f7a42c5ba896c488f4662415bde4ab8af55d8f35d08ede55733",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/119/pg119.rdf",
+          "rdfSha256": "997a53a922f450ac32db52c566b154c29bb41cc16fb38461f1cebb6b93af3422",
+          "rights": "Public domain in the USA."
+        },
+        {
+          "bookId": "gutenberg:245",
+          "title": "Life on the Mississippi",
+          "gutenbergId": "245",
+          "catalogCoverUrl": "https://www.gutenberg.org/cache/epub/245/pg245.cover.medium.jpg",
+          "sourcePage": "https://www.gutenberg.org/ebooks/245",
+          "downloadUrl": "https://gutenberg.pglaf.org/cache/epub/245/pg245.cover.medium.jpg",
+          "coverSha256": "6e71e7bb5acea66721ff9469a4723d6ad5896dc514f9f0bf6e43215ea45eedba",
+          "rdfUrl": "https://gutenberg.pglaf.org/cache/epub/245/pg245.rdf",
+          "rdfSha256": "f9ad2e15287003e5243c625043ea25942e5da3f20dc4e56cc5d713e8450ae3b9",
+          "rights": "Public domain in the USA."
+        }
+      ],
+      "sha256": "2e5ecc4f9234d31457b1a462aab080d7da8f1e6722673ebc7281e3c6be50228d"
+    }
+  ]
+}

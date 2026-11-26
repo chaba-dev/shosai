@@ -306,7 +306,8 @@ final class _LibraryReaderClosed extends LibraryMessage {
 }
 
 final class _LibraryEffectFinished extends LibraryMessage {
-  const _LibraryEffectFinished();
+  const _LibraryEffectFinished({this.loading = false});
+  final bool loading;
 }
 
 final class _LibraryCoverLoaded extends LibraryMessage {
