@@ -659,9 +659,9 @@ void main() {
   }
 
   for (final dark in [false, true]) {
-    for (final (width, scale) in [(600.0, 1.0), (800.0, 2.0)]) {
+    for (final (width, scale) in [(600.0, 1.0), (800.0, 2.0), (1280.0, 1.0)]) {
       testWidgets(
-        'source actions wrap within the framed tablet (dark: $dark, width: $width, scale: $scale)',
+        'source actions reflow within the frame (dark: $dark, width: $width, scale: $scale)',
         (tester) async {
           HarnessView(size: Size(width, 1000), textScale: scale).apply(tester);
           tester.platformDispatcher.platformBrightnessTestValue = dark
@@ -672,11 +672,12 @@ void main() {
           );
           final details = await tester.runAsync(() => catalog.book('0'));
           final messages = <BrowseMessage>[];
+          final layout = ShellLayout.forWidth(width);
           await tester.pumpWidget(
             productionShell(
               home: Scaffold(
                 body: ShellFrame(
-                  layout: ShellLayout.tablet,
+                  layout: layout,
                   model: const ShellModel(place: ShellPlace.search),
                   covers: const {},
                   actions: ShellActions(
@@ -687,7 +688,7 @@ void main() {
                     loadCover: (_) => false,
                   ),
                   child: ShellBrowsePage(
-                    layout: ShellLayout.tablet,
+                    layout: layout,
                     model: BrowseModel(details: details),
                     local: const ShellSearchModel(),
                     dispatch: messages.add,
@@ -697,11 +698,28 @@ void main() {
               ),
             ),
           );
+          final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+          final page = tester.getRect(find.byType(ShellBrowsePage));
+          final pickerBounds = tester.getRect(picker);
+          expect(pickerBounds.right, closeTo(page.right - 32, 0.1));
+          if (width == 600) {
+            expect(pickerBounds.width, closeTo(page.width - 64, 0.1));
+          }
+          if (width == 1280) {
+            final source = tester.getRect(
+              find.widgetWithText(ShadButton, 'View at source'),
+            );
+            final support = tester.getRect(
+              find.widgetWithText(ShadButton, 'Support Project Gutenberg'),
+            );
+            expect(support.top, closeTo(source.top, 0.1));
+            expect(support.left, greaterThan(source.right));
+          }
           for (final (name, label, url) in [
             ('source', 'View at source', details!.editions.first.sourceUrl),
             (
               'support',
-              'Support this source',
+              'Support Project Gutenberg',
               details.editions.first.supportUrl,
             ),
           ]) {
@@ -723,6 +741,41 @@ void main() {
       );
     }
   }
+
+  testWidgets('sources without a donation URL have no support action', (
+    tester,
+  ) async {
+    const HarnessView(size: Size(1280, 900)).apply(tester);
+    final noDonations = createCatalogFixture(
+      Directory('${root.path}/no-donations'),
+      supportUrl: null,
+    );
+    addTearDown(noDonations.close);
+    final details = await tester.runAsync(() => noDonations.book('0'));
+    final messages = <BrowseMessage>[];
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: ShellBrowsePage(
+            layout: ShellLayout.desktop,
+            model: BrowseModel(details: details),
+            local: const ShellSearchModel(),
+            dispatch: messages.add,
+            onChosen: (_) {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Support Project Gutenberg'), findsNothing);
+    expect(find.text('Support this source'), findsNothing);
+    await tester.tap(find.text('View at source'));
+    expect(
+      (messages.single as BrowseLinkRequested).url,
+      details!.editions.first.sourceUrl,
+    );
+    await capture(tester, 'catalog-source-no-donations');
+    await tester.pumpWidget(const SizedBox());
+  });
 
   for (final dark in [false, true]) {
     testWidgets(

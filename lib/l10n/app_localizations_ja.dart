@@ -1478,7 +1478,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get catalogViewSource => '提供元で確認';
 
   @override
-  String get catalogSupportSource => '提供元を支援';
+  String catalogSupportSource(String project) {
+    return '$projectを支援';
+  }
 
   @override
   String get catalogLinkFailed => '提供元を開けませんでした。もう一度お試しください。';

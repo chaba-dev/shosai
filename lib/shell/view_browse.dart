@@ -951,8 +951,8 @@ class _CatalogBookPage extends StatelessWidget {
               if (details.editions.isNotEmpty) ...[
                 Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 560),
+                  child: SizedBox(
+                    width: double.infinity,
                     child: LayoutBuilder(
                       builder: (context, constraints) => Focus(
                         skipTraversal: true,
@@ -1069,33 +1069,40 @@ class _CatalogBookPage extends StatelessWidget {
                     ),
                   ),
                 const SizedBox(height: ShosaiTokens.space3),
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: ConstrainedBox(
-                    constraints: sourceButtonConstraints,
-                    child: ShadButton.outline(
-                      height: 0,
-                      onPressed: () => dispatch(
-                        BrowseLinkRequested(
-                          details.editions[model.edition].sourceUrl,
+                Wrap(
+                  spacing: ShosaiTokens.space2,
+                  runSpacing: ShosaiTokens.space2,
+                  children: [
+                    ConstrainedBox(
+                      constraints: sourceButtonConstraints,
+                      child: ShadButton.outline(
+                        height: 0,
+                        onPressed: () => dispatch(
+                          BrowseLinkRequested(
+                            details.editions[model.edition].sourceUrl,
+                          ),
+                        ),
+                        child: Flexible(child: Text(l10n.catalogViewSource)),
+                      ),
+                    ),
+                    if (details.editions[model.edition].supportUrl
+                        case final url?)
+                      ConstrainedBox(
+                        constraints: sourceButtonConstraints,
+                        child: ShadButton.ghost(
+                          height: 0,
+                          onPressed: () => dispatch(BrowseLinkRequested(url)),
+                          child: Flexible(
+                            child: Text(
+                              l10n.catalogSupportSource(
+                                details.editions[model.edition].sourceName,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      child: Flexible(child: Text(l10n.catalogViewSource)),
-                    ),
-                  ),
+                  ],
                 ),
-                if (details.editions[model.edition].supportUrl case final url?)
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: ConstrainedBox(
-                      constraints: sourceButtonConstraints,
-                      child: ShadButton.ghost(
-                        height: 0,
-                        onPressed: () => dispatch(BrowseLinkRequested(url)),
-                        child: Flexible(child: Text(l10n.catalogSupportSource)),
-                      ),
-                    ),
-                  ),
                 if (model.linkFailed) _CatalogError(l10n.catalogLinkFailed),
               ],
               if (phone && details.editions.isNotEmpty) ...[
@@ -1149,10 +1156,9 @@ class _CatalogBookPage extends StatelessWidget {
                   const SizedBox(height: ShosaiTokens.space5),
                   metadata,
                 ] else
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cover = SizedBox(
                         width: 200,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1168,10 +1174,26 @@ class _CatalogBookPage extends StatelessWidget {
                             ],
                           ],
                         ),
-                      ),
-                      const SizedBox(width: ShosaiTokens.space6),
-                      Expanded(child: metadata),
-                    ],
+                      );
+                      if (constraints.maxWidth < 560) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(child: cover),
+                            const SizedBox(height: ShosaiTokens.space5),
+                            metadata,
+                          ],
+                        );
+                      }
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          cover,
+                          const SizedBox(width: ShosaiTokens.space6),
+                          Expanded(child: metadata),
+                        ],
+                      );
+                    },
                   ),
             ],
           ),

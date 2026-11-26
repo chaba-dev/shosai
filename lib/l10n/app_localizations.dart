@@ -2625,8 +2625,8 @@ abstract class AppLocalizations {
   /// No description provided for @catalogSupportSource.
   ///
   /// In en, this message translates to:
-  /// **'Support this source'**
-  String get catalogSupportSource;
+  /// **'Support {project}'**
+  String catalogSupportSource(String project);
 
   /// No description provided for @catalogLinkFailed.
   ///

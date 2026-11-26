@@ -419,7 +419,7 @@
   "catalogChooseEdition": "版を選ぶ",
   "catalogBytes": "{count}バイト",
   "catalogViewSource": "提供元で確認",
-  "catalogSupportSource": "提供元を支援",
+  "catalogSupportSource": "{project}を支援",
   "catalogLinkFailed": "提供元を開けませんでした。もう一度お試しください。",
   "catalogSaveTo": "保存先",
   "catalogPrivateLibrary": "この端末のプライベートライブラリ",
