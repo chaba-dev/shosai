@@ -954,22 +954,13 @@ class _CatalogBookPage extends StatelessWidget {
                 spacing: ShosaiTokens.space2,
                 children: [
                   for (final (index, author) in details.authors.indexed) ...[
-                    ConstrainedBox(
-                      constraints: sourceButtonConstraints,
-                      child: ShadButton.ghost(
-                        height: 0,
-                        padding: EdgeInsets.zero,
-                        foregroundColor: palette.accent,
-                        hoverForegroundColor: palette.accent,
-                        onPressed: () => browseAuthor(author),
-                        child: Text(
-                          author.name,
-                          style: shellInterfaceStyle(
-                            16,
-                            24,
-                            weight: FontWeight.w500,
-                          ),
-                        ),
+                    ShellLink(
+                      label: author.name,
+                      onPressed: () => browseAuthor(author),
+                      style: shellInterfaceStyle(
+                        16,
+                        24,
+                        weight: FontWeight.w500,
                       ),
                     ),
                     if ([
@@ -1165,19 +1156,11 @@ class _CatalogBookPage extends StatelessWidget {
                     ),
                     if (details.editions[model.edition].supportUrl
                         case final url?)
-                      ConstrainedBox(
-                        constraints: sourceButtonConstraints,
-                        child: ShadButton.ghost(
-                          height: 0,
-                          onPressed: () => dispatch(BrowseLinkRequested(url)),
-                          child: Flexible(
-                            child: Text(
-                              l10n.catalogSupportSource(
-                                details.editions[model.edition].sourceName,
-                              ),
-                            ),
-                          ),
+                      ShellLink(
+                        label: l10n.catalogSupportSource(
+                          details.editions[model.edition].sourceName,
                         ),
+                        onPressed: () => dispatch(BrowseLinkRequested(url)),
                       ),
                   ],
                 ),
@@ -1315,19 +1298,12 @@ class _CatalogBookPage extends StatelessWidget {
                         ),
                       ],
                     );
-                    final all = ConstrainedBox(
-                      constraints: sourceButtonConstraints,
-                      child: ShadButton.ghost(
-                        height: 0,
-                        trailing: const Icon(
-                          LucideIcons.chevronRight,
-                          size: 18,
-                        ),
-                        onPressed: () => browseAuthor(details.authors.first),
-                        child: Text(
-                          l10n.catalogAllByAuthor(details.authors.first.books),
-                        ),
+                    final all = ShellLink(
+                      label: l10n.catalogAllByAuthor(
+                        details.authors.first.books,
                       ),
+                      trailing: LucideIcons.chevronRight,
+                      onPressed: () => browseAuthor(details.authors.first),
                     );
                     if (constraints.maxWidth < 560) {
                       return Column(
