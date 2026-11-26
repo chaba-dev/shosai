@@ -78,7 +78,7 @@ published at https://chaba-rfds.pages.dev. The
 
 ## Website
 
-Visit the [public website](https://www.readshosai.com/) or read its [catalog revision index](https://www.readshosai.com/catalog/revisions.json). The Hugo source, checked-in catalog and publication workflows live in the [maintainer-only website repository](https://github.com/chaba-dev/shosai-website), which documents local development, catalog refresh and Cloudflare Pages configuration. The Dart catalog importer and exporter remain in this repository.
+Visit the [public website](https://www.readshosai.com/) or read the independently hosted [catalog revision index](https://catalog.shosai.dev/revisions.json). The Hugo source lives in the [maintainer-only website repository](https://github.com/chaba-dev/shosai-website). Catalog snapshots, validation, refresh workflows, and independent Pages publication belong to the [catalog repository](https://github.com/chaba-dev/shosai-catalog). The Dart catalog importer and exporter remain in this repository.
 
 ## License
 
