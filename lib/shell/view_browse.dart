@@ -841,39 +841,36 @@ class _CatalogBookPage extends StatelessWidget {
       offset: 4,
       radius: BorderRadius.circular(ShosaiTokens.radiusSm + 4),
     );
-    final sourceButtonConstraints = BoxConstraints(
-      minHeight: math.max(
-        ShosaiTokens.sizeTouchTarget,
-        shosaiShadButtonHeight(context),
-      ),
+    Widget editionLabel(
+      CatalogEdition edition, {
+      bool selected = false,
+    }) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${edition.sourceName} · ${edition.variant}',
+          style: shellInterfaceStyle(14, 20).copyWith(
+            color: selected ? theme.colorScheme.accentForeground : palette.ink,
+          ),
+        ),
+        Text(
+          [
+            edition.format.toUpperCase(),
+            edition.language,
+            // Decimal units, as the platforms' file managers show them.
+            if (edition.sizeBytes case final size?)
+              size < 100000
+                  ? l10n.catalogKilobytes(math.max(1, (size / 1000).round()))
+                  : l10n.catalogMegabytes(size / 1000000),
+          ].join(' · '),
+          style: shellInterfaceStyle(13, 20).copyWith(
+            color: selected
+                ? theme.colorScheme.accentForeground
+                : palette.inkMuted,
+          ),
+        ),
+      ],
     );
-    Widget editionLabel(CatalogEdition edition, {bool selected = false}) =>
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${edition.sourceName} · ${edition.variant}',
-              style: shellInterfaceStyle(14, 20).copyWith(
-                color: selected
-                    ? theme.colorScheme.accentForeground
-                    : palette.ink,
-              ),
-            ),
-            Text(
-              [
-                edition.format.toUpperCase(),
-                edition.language,
-                if (edition.sizeBytes != null)
-                  l10n.catalogBytes(edition.sizeBytes!),
-              ].join(' · '),
-              style: shellInterfaceStyle(13, 20).copyWith(
-                color: selected
-                    ? theme.colorScheme.accentForeground
-                    : palette.inkMuted,
-              ),
-            ),
-          ],
-        );
     PopupMenuItem<int> editionOption(int index, CatalogEdition edition) =>
         PopupMenuItem<int>(
           value: index,
@@ -938,6 +935,17 @@ class _CatalogBookPage extends StatelessWidget {
     String year(int value) =>
         value < 0 ? l10n.catalogYearBce(-value) : '$value';
     final muted = shellInterfaceStyle(16, 24).copyWith(color: palette.inkMuted);
+    final bookFacts = details == null
+        ? const <String>[]
+        : [
+            if (details.editions.isNotEmpty)
+              details.editions[model.edition].language
+                  .split(';')
+                  .map((code) => l10n.catalogLanguageName(code.trim()))
+                  .join(', '),
+            if (details.readingEase case final ease?)
+              l10n.catalogReadingEase(ease),
+          ];
     final header = details == null
         ? const SizedBox.shrink()
         : Column(
@@ -954,22 +962,13 @@ class _CatalogBookPage extends StatelessWidget {
                 spacing: ShosaiTokens.space2,
                 children: [
                   for (final (index, author) in details.authors.indexed) ...[
-                    ConstrainedBox(
-                      constraints: sourceButtonConstraints,
-                      child: ShadButton.ghost(
-                        height: 0,
-                        padding: EdgeInsets.zero,
-                        foregroundColor: palette.accent,
-                        hoverForegroundColor: palette.accent,
-                        onPressed: () => browseAuthor(author),
-                        child: Text(
-                          author.name,
-                          style: shellInterfaceStyle(
-                            16,
-                            24,
-                            weight: FontWeight.w500,
-                          ),
-                        ),
+                    ShellLink(
+                      label: author.name,
+                      onPressed: () => browseAuthor(author),
+                      style: shellInterfaceStyle(
+                        16,
+                        24,
+                        weight: FontWeight.w500,
                       ),
                     ),
                     if ([
@@ -977,22 +976,14 @@ class _CatalogBookPage extends StatelessWidget {
                               author.deathYear != null)
                             '${author.birthYear == null ? '' : year(author.birthYear!)}'
                                 '–${author.deathYear == null ? '' : year(author.deathYear!)}',
-                          if (index == details.authors.length - 1) ...[
-                            if (details.editions.isNotEmpty)
-                              details.editions[model.edition].language
-                                  .split(';')
-                                  .map(
-                                    (code) =>
-                                        l10n.catalogLanguageName(code.trim()),
-                                  )
-                                  .join(', '),
-                            if (details.readingEase case final ease?)
-                              l10n.catalogReadingEase(ease),
-                          ],
+                          if (index == details.authors.length - 1) ...bookFacts,
                         ]
                         case final facts when facts.isNotEmpty)
                       Text(facts.join(' · '), style: muted),
                   ],
+                  // Book facts do not depend on an author being catalogued.
+                  if (details.authors.isEmpty && bookFacts.isNotEmpty)
+                    Text(bookFacts.join(' · '), style: muted),
                 ],
               ),
             ],
@@ -1015,8 +1006,24 @@ class _CatalogBookPage extends StatelessWidget {
                   spacing: ShosaiTokens.space2,
                   runSpacing: ShosaiTokens.space2,
                   children: [
-                    for (final subject in details.subjects)
-                      Chip(label: Text(subject)),
+                    for (final (label, heading) in _subjectTags(
+                      details.subjects,
+                    ))
+                      Semantics(
+                        label: heading,
+                        excludeSemantics: true,
+                        child: Chip(
+                          label: Text(label),
+                          labelStyle: shellInterfaceStyle(
+                            14,
+                            20,
+                          ).copyWith(color: palette.ink),
+                          backgroundColor: palette.surface,
+                          shape: StadiumBorder(
+                            side: BorderSide(color: palette.lineStrong),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ],
@@ -1148,36 +1155,23 @@ class _CatalogBookPage extends StatelessWidget {
                   ),
                 const SizedBox(height: ShosaiTokens.space3),
                 Wrap(
-                  spacing: ShosaiTokens.space2,
-                  runSpacing: ShosaiTokens.space2,
+                  spacing: ShosaiTokens.space5,
                   children: [
-                    ConstrainedBox(
-                      constraints: sourceButtonConstraints,
-                      child: ShadButton.outline(
-                        height: 0,
-                        onPressed: () => dispatch(
-                          BrowseLinkRequested(
-                            details.editions[model.edition].sourceUrl,
-                          ),
+                    ShellLink(
+                      label: l10n.catalogViewSource,
+                      onPressed: () => dispatch(
+                        BrowseLinkRequested(
+                          details.editions[model.edition].sourceUrl,
                         ),
-                        child: Flexible(child: Text(l10n.catalogViewSource)),
                       ),
                     ),
                     if (details.editions[model.edition].supportUrl
                         case final url?)
-                      ConstrainedBox(
-                        constraints: sourceButtonConstraints,
-                        child: ShadButton.ghost(
-                          height: 0,
-                          onPressed: () => dispatch(BrowseLinkRequested(url)),
-                          child: Flexible(
-                            child: Text(
-                              l10n.catalogSupportSource(
-                                details.editions[model.edition].sourceName,
-                              ),
-                            ),
-                          ),
+                      ShellLink(
+                        label: l10n.catalogSupportSource(
+                          details.editions[model.edition].sourceName,
                         ),
+                        onPressed: () => dispatch(BrowseLinkRequested(url)),
                       ),
                   ],
                 ),
@@ -1315,19 +1309,12 @@ class _CatalogBookPage extends StatelessWidget {
                         ),
                       ],
                     );
-                    final all = ConstrainedBox(
-                      constraints: sourceButtonConstraints,
-                      child: ShadButton.ghost(
-                        height: 0,
-                        trailing: const Icon(
-                          LucideIcons.chevronRight,
-                          size: 18,
-                        ),
-                        onPressed: () => browseAuthor(details.authors.first),
-                        child: Text(
-                          l10n.catalogAllByAuthor(details.authors.first.books),
-                        ),
+                    final all = ShellLink(
+                      label: l10n.catalogAllByAuthor(
+                        details.authors.first.books,
                       ),
+                      trailing: LucideIcons.chevronRight,
+                      onPressed: () => browseAuthor(details.authors.first),
                     );
                     if (constraints.maxWidth < 560) {
                       return Column(
@@ -1367,6 +1354,19 @@ class _CatalogBookPage extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Subject tags as the mock shows them: each Library of Congress heading by
+/// its first term ("England -- Fiction" reads "England"), once per term, in
+/// catalog order. The full heading stays the tag's accessible label.
+List<(String, String)> _subjectTags(List<String> subjects) {
+  final seen = <String>{};
+  return [
+    for (final heading in subjects)
+      if (heading.split(' -- ').first.trim() case final label
+          when label.isNotEmpty && seen.add(label))
+        (label, heading),
+  ];
 }
 
 /// The sources above a book title, in the sidebar's small-caps label style.

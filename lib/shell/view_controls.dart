@@ -30,6 +30,91 @@ class ShellCount extends StatelessWidget {
   }
 }
 
+/// A text link (`sh-link`; `docs/design-system.md`, Link): words that go
+/// somewhere, such as an author's books, a source's page or its donation
+/// page. Accent text with no fill or padding, underlined on hover, with the
+/// shared focus ring and a 44 px minimum target that grows with the label.
+/// Actions that change something stay a [ShadButton].
+class ShellLink extends StatefulWidget {
+  const ShellLink({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.trailing,
+    this.style,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+  final IconData? trailing;
+
+  /// Interface body 16/24 unless the surrounding line sets another role.
+  final TextStyle? style;
+
+  @override
+  State<ShellLink> createState() => _ShellLinkState();
+}
+
+class _ShellLinkState extends State<ShellLink> {
+  final _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ShellPalette.of(context).accent;
+    // One link node for assistive technology instead of Shad's button. The
+    // button below owns keyboard focus and activation; the node reflects
+    // that same focus node, so assistive technology sees and moves it.
+    return ListenableBuilder(
+      listenable: _focus,
+      builder: (context, child) => Semantics(
+        container: true,
+        link: true,
+        label: widget.label,
+        focusable: _focus.canRequestFocus,
+        focused: _focus.hasFocus,
+        onFocus: _focus.requestFocus,
+        onTap: widget.onPressed,
+        excludeSemantics: true,
+        child: child,
+      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: ShosaiTokens.sizeTouchTarget,
+          minHeight: math.max(
+            ShosaiTokens.sizeTouchTarget,
+            shosaiShadButtonHeight(context),
+          ),
+        ),
+        child: ShadButton.link(
+          focusNode: _focus,
+          height: 0,
+          padding: EdgeInsets.zero,
+          foregroundColor: accent,
+          hoverForegroundColor: accent,
+          pressedForegroundColor: accent,
+          hoverTextDecoration: TextDecoration.underline,
+          onPressed: widget.onPressed,
+          trailing: widget.trailing == null
+              ? null
+              : Icon(widget.trailing, size: 18, color: accent),
+          child: Flexible(
+            child: Text(
+              widget.label,
+              style: widget.style ?? shellInterfaceStyle(16, 24),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// One option of a [ShellSegmentedControl]: its value and its short noun.
 typedef ShellSegment<T> = ({T value, String label});
 
