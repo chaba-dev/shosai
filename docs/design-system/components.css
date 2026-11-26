@@ -273,7 +273,7 @@
 .sh-cover { border-top: 3px solid var(--brand-gold); }
 
 /* Link: words that go somewhere. Accent text, no padding; the underline shows on hover. */
-.sh-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch-target); padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--accent); text-decoration: none; cursor: pointer; }
+.sh-link { display: inline-flex; align-items: center; gap: var(--space-1); min-width: var(--touch-target); min-height: var(--touch-target); padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--accent); text-decoration: none; cursor: pointer; }
 .sh-link:hover { text-decoration: underline; text-underline-offset: .18em; }
 
 /* TypefacePicker: the six type sets behind the Typeface row. Each row carries its own fonts. */

@@ -744,6 +744,56 @@ void main() {
     }
   }
 
+  testWidgets('authorless books keep their facts; links are labelled links', (
+    tester,
+  ) async {
+    const HarnessView(size: Size(1280, 900), textScale: 2).apply(tester);
+    final semantics = tester.ensureSemantics();
+    final d = (await tester.runAsync(() => catalog.book('0')))!;
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ShellLink(label: 'Li', onPressed: () {}),
+              Expanded(
+                child: ShellBrowsePage(
+                  layout: ShellLayout.desktop,
+                  model: BrowseModel(
+                    details: (
+                      book: d.book,
+                      editions: d.editions,
+                      subjects: d.subjects,
+                      authors: const [],
+                      summary: d.summary,
+                      readingEase: d.readingEase,
+                      moreByAuthor: const [],
+                    ),
+                  ),
+                  local: const ShellSearchModel(),
+                  dispatch: (_) {},
+                  onChosen: (_) {},
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.text('English · Reading ease 69'), findsOneWidget);
+    final short = tester.getRect(find.byType(ShellLink).first);
+    expect(short.width, greaterThanOrEqualTo(44));
+    expect(short.height, greaterThanOrEqualTo(44));
+    final link = tester.getSemantics(find.byType(ShellLink).first);
+    expect(link.label, 'Li');
+    expect(link.flagsCollection.isLink, isTrue);
+    expect(link.flagsCollection.isButton, isFalse);
+    expect(link.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+    semantics.dispose();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('sources without a donation URL have no support action', (
     tester,
   ) async {
@@ -1839,11 +1889,16 @@ void main() {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         final stage = Directory('${root.path}/real/snapshot')
           ..createSync(recursive: true);
-        for (final file in Directory(realCatalog!).listSync(recursive: true)) {
+        // Canonical paths, so a trailing slash or symlink in the variable
+        // does not shift the relative names.
+        final source = Directory(realCatalog!).resolveSymbolicLinksSync();
+        for (final file in Directory(source).listSync(recursive: true)) {
           if (file is! File) continue;
-          final target = File(
-            '${stage.path}${file.path.substring(realCatalog.length)}',
-          )..parent.createSync(recursive: true);
+          final relative = file.resolveSymbolicLinksSync().substring(
+            source.length + 1,
+          );
+          final target = File('${stage.path}/$relative')
+            ..parent.createSync(recursive: true);
           file.copySync(target.path);
         }
         importCatalog(
@@ -1881,6 +1936,7 @@ void main() {
           return server;
         }))!;
         final client = _CoverHttpClient(server.port);
+        final previousProvider = debugNetworkImageHttpClientProvider;
         debugNetworkImageHttpClientProvider = () => client;
         try {
           final controller = BrowseController(
@@ -1943,7 +1999,7 @@ void main() {
           await capture(tester, 'catalog-real-$name-book-source');
           await tester.pumpWidget(const SizedBox());
         } finally {
-          debugNetworkImageHttpClientProvider = null;
+          debugNetworkImageHttpClientProvider = previousProvider;
           client.close(force: true);
           upstream.close(force: true);
           await tester.runAsync(() => server.close(force: true));

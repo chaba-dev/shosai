@@ -66,9 +66,13 @@ void main() {
       for (final query in ['猫', '吾輩', '吾輩は']) {
         expect((await client.search(query: query)).map((b) => b.id), ['cat']);
       }
-      expect((await client.search(query: 'AUSTEN')).map((b) => b.id), [
-        'pride',
-      ]);
+      // The catalog heading and the display name on book cards both match.
+      for (final query in ['AUSTEN', 'Austen, Jane', 'Jane Austen']) {
+        expect((await client.search(query: query)).map((b) => b.id), ['pride']);
+        expect((await client.authors(query: query)).map((a) => a.name), [
+          'Austen, Jane',
+        ]);
+      }
       expect((await client.search(query: 'STRASSE')).map((b) => b.id), [
         'symbols',
       ]);
@@ -198,6 +202,29 @@ void main() {
       final bounded = await client.categoryPreviews(categoryIds: ['fiction']);
       expect(bounded.keys, ['fiction']);
       expect(bounded['fiction']!.map((book) => book.id), ['cat', 'pride']);
+    },
+  );
+
+  test(
+    'a catalog installed before the details tables stays searchable until replaced',
+    () async {
+      expect(await client.refresh(), CatalogRefresh.installed);
+      // Reduce the installed index to the version 1 layout.
+      final db = sqlite3.open('${root.path}/device/catalog/catalog.sqlite3');
+      db.execute('''DROP TABLE author_details; DROP TABLE book_details;
+        PRAGMA user_version = 1''');
+      db.close();
+      expect((await client.search(query: 'Pride')).single.authors, [
+        'Austen, Jane',
+      ]);
+      final book = (await client.book('pride'))!;
+      expect(book.authors.single.name, 'Austen, Jane');
+      expect((book.summary, book.readingEase), (null, null));
+      expect(book.editions, hasLength(2));
+      // An unchanged snapshot still replaces the older index.
+      now = now.add(const Duration(days: 2));
+      expect(await client.refresh(), CatalogRefresh.installed);
+      expect((await client.book('pride'))!.summary, 'Courtship, at length.');
     },
   );
 

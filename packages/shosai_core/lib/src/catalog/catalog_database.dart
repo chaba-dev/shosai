@@ -67,6 +67,8 @@ bool catalogMatches(String path, CatalogManifest candidate) {
   if (!File(path).existsSync()) return false;
   try {
     return _read(path, (db) {
+      // An older catalog is never current, whatever its manifest says.
+      if (db.userVersion != catalogDatabaseVersion) return false;
       // An intact manifest does not establish that the search pages survived.
       // This runs only on an eligible refresh, off the UI isolate.
       if (db
@@ -179,12 +181,14 @@ void importCatalog(String stage, String manifestText) {
       'INSERT INTO catalog_search(rowid, title, authors) VALUES (?, ?, ?)',
     );
     try {
-      for (final row in db.select(
-        '''SELECT b.rowid, b.title,
+      for (final row in db.select('''SELECT b.rowid, b.title,
         (SELECT group_concat(name, char(10)) FROM
           (SELECT a.name FROM book_authors ba JOIN authors a ON a.id=ba.author_id
-           WHERE ba.book_id=b.id ORDER BY ba.position)) AS authors FROM books b''',
-      )) {
+           WHERE ba.book_id=b.id
+           UNION ALL
+           SELECT d.display_name FROM book_authors ba
+           JOIN author_details d ON d.author_id=ba.author_id
+           WHERE ba.book_id=b.id)) AS authors FROM books b''')) {
         insert.execute([
           row['rowid'],
           caseFold(row['title'] as String),
@@ -214,8 +218,19 @@ void importCatalog(String stage, String manifestText) {
 T _read<T>(String path, T Function(Database) body) {
   final db = sqlite3.open(path, mode: OpenMode.readOnly);
   try {
-    if (db.userVersion != catalogDatabaseVersion) {
-      throw const FormatException('Unsupported installed catalog');
+    switch (db.userVersion) {
+      case catalogDatabaseVersion:
+        break;
+      case 1:
+        // A catalog installed before the details tables stays searchable until
+        // a refresh replaces it. Empty temporary tables (private to this
+        // read-only connection) stand in for the details it does not have.
+        db.execute('''CREATE TEMP TABLE author_details(author_id TEXT,
+          display_name TEXT, birth_year INTEGER, death_year INTEGER);
+          CREATE TEMP TABLE book_details(book_id TEXT, summary TEXT,
+          reading_ease INTEGER)''');
+      default:
+        throw const FormatException('Unsupported installed catalog');
     }
     return body(db);
   } finally {
@@ -368,12 +383,20 @@ List<CatalogAuthor> catalogAuthors(
     // Author names are small enough to filter outside FTS, using the same
     // Unicode case folding as title search rather than SQLite's ASCII lower().
     final folded = caseFold(query.trim());
-    final rows = db.select('''SELECT a.id, a.name, COUNT(*) AS n FROM authors a
-      JOIN book_authors ba ON ba.author_id=a.id GROUP BY a.id
+    // Either the catalog heading or the display name shown on book cards
+    // finds an author; the list keeps the heading, whose dates disambiguate.
+    final rows = db.select('''SELECT a.id, a.name, d.display_name,
+      COUNT(*) AS n FROM authors a
+      JOIN book_authors ba ON ba.author_id=a.id
+      LEFT JOIN author_details d ON d.author_id=a.id GROUP BY a.id
       ORDER BY a.sort_name COLLATE NOCASE, a.id''');
     return List.unmodifiable(
       rows
-          .where((r) => caseFold(r['name'] as String).contains(folded))
+          .where(
+            (r) =>
+                caseFold(r['name'] as String).contains(folded) ||
+                caseFold(r['display_name'] as String? ?? '').contains(folded),
+          )
           .skip(offset)
           .take(limit)
           .map(
