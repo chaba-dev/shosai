@@ -21,9 +21,15 @@ describes publication. Import with `dart run tool/import_gutenberg.dart
 DOWNLOADED_CSV_OR_CSV_GZ DOWNLOADED_RDF_TAR_BZ2 NEW.sqlite` before exporting;
 website automation must pin a revision supporting this three-path interface.
 A plain `.rdf` file is also accepted for the second input. The importer joins
-CSV search metadata with RDF-listed EPUB URLs, sizes and rights. It omits works
-without a listed EPUB, preserves each listed variant and prefers EPUB3 when
-available. Labels distinguish EPUB3 from the older EPUB2 variants. Missing sizes
+CSV search metadata with RDF-listed EPUB URLs, sizes and rights. Until Gutenberg
+adds the formats it generates, a new release's RDF lists only its uploaded
+`N-0.txt` or `N-h/N-h.htm`, though Gutenberg already serves its EPUBs. For a
+record that lists nothing but uploads under `/files/N/` including one of those,
+the importer infers the standard EPUB3-with-images and EPUB2-without-images
+editions with unknown sizes. This is an inference from file names, not proof
+that Gutenberg generated them. It omits other works without a listed EPUB,
+such as TeX/PDF-only works, preserves each listed variant and prefers EPUB3
+when available. Labels distinguish EPUB3 from the older EPUB2 variants. Missing sizes
 stay unknown; missing rights retain the instruction to check Gutenberg.
 
 The same RDF pass supplies descriptive details. A work's `marc520` summary and
@@ -35,8 +41,10 @@ publication, so the catalog does not record a publication year.
 The source row carries Gutenberg's donation page as `support_url`; a source
 without one leaves it null, and the app then shows no Support action.
 
-The Nix shell supplies `gzip`, GNU `tar` and `bzip2`. The archive is streamed
-without extracting files to disk; neither the importer nor the app crawls book
+The Nix shell supplies `gzip` and `bzip2`. The importer reads the archive's
+tar stream from `bzip2` without extracting files to disk, parses batches of
+RDF documents on worker isolates and inserts their rows in archive order, so
+the output matches a serial pass. Neither the importer nor the app crawls book
 pages to discover variants. A malformed XML document, invalid EPUB URL or size,
 or damaged compressed input fails without leaving a partial output database.
 

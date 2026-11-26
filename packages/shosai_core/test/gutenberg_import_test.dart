@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
@@ -370,6 +372,75 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
   });
 
   test(
+    'lists standard EPUBs only for a release whose RDF has just its uploads',
+    () async {
+      final dir = tempDataDirectory();
+      final input = File('${dir.path}/catalog.csv')
+        ..writeAsStringSync(
+          '${_excerpt.readAsStringSync()}'
+          '79882,Text,2026-10-30,Gallipoli memories,en,,,,\n'
+          '79956,Text,2026-11-08,Text upload only,en,,,,\n'
+          '59248,Text,2019-04-11,The Mathematical Theory of Relativity,en,,,,\n'
+          '70427,Text,2022-04-01,Generated HTML only,en,,,,\n',
+        );
+      final output = File('${dir.path}/catalog.sqlite');
+      expect(await importGutenbergFile(input, output, rdf: _rdf), (
+        works: 5,
+        editions: 9,
+        skipped: 3,
+      ));
+      final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+      addTearDown(db.close);
+      expect(
+        db
+            .select('''
+      SELECT book_id, variant_label, display_order, acquisition_url,
+        size_bytes, rights_line
+      FROM editions WHERE book_id IN
+        ('gutenberg:79882', 'gutenberg:79956', 'gutenberg:59248',
+         'gutenberg:70427')
+      ORDER BY book_id, display_order
+    ''')
+            .map((row) => row.values),
+        [
+          [
+            'gutenberg:79882',
+            'EPUB3 with images',
+            0,
+            'https://www.gutenberg.org/ebooks/79882.epub3.images',
+            null,
+            'Public domain in the USA.',
+          ],
+          [
+            'gutenberg:79882',
+            'EPUB2 without images',
+            1,
+            'https://www.gutenberg.org/ebooks/79882.epub.noimages',
+            null,
+            'Public domain in the USA.',
+          ],
+          [
+            'gutenberg:79956',
+            'EPUB3 with images',
+            0,
+            'https://www.gutenberg.org/ebooks/79956.epub3.images',
+            null,
+            'Rights not listed in the offline catalog. Check Project Gutenberg.',
+          ],
+          [
+            'gutenberg:79956',
+            'EPUB2 without images',
+            1,
+            'https://www.gutenberg.org/ebooks/79956.epub.noimages',
+            null,
+            'Rights not listed in the offline catalog. Check Project Gutenberg.',
+          ],
+        ],
+      );
+    },
+  );
+
+  test(
     'streams independent RDF documents from an archive without extracting files',
     () async {
       final dir = tempDataDirectory();
@@ -410,6 +481,126 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
         throwsFormatException,
       );
       expect(broken.existsSync(), isFalse);
+    },
+  );
+
+  test(
+    'reads extended, contiguous and renamed members as GNU tar does',
+    () async {
+      final dir = tempDataDirectory();
+      final rdf = _rdf.readAsBytesSync();
+      for (final (name, tar) in [
+        (
+          'pax-path',
+          [
+            ..._tarMember(
+              'PaxHeader',
+              _paxRecord('path', 'cache/odd\nname.rdf'),
+              type: 0x78,
+            ),
+            ..._tarMember('placeholder', rdf),
+          ],
+        ),
+        (
+          'pax-size',
+          [
+            ..._tarMember(
+              'PaxHeader',
+              _paxRecord('size', '${rdf.length}'),
+              type: 0x78,
+            ),
+            ..._tarMember('pg1.rdf', rdf, size: 0),
+          ],
+        ),
+        ('contiguous', _tarMember('pg1.rdf', rdf, type: 0x37)),
+      ]) {
+        final archive = await _bzip2('${dir.path}/$name.tar.bz2', [
+          ...tar,
+          ..._endOfArchive,
+        ]);
+        final output = File('${dir.path}/$name.sqlite');
+        expect(await importGutenbergFile(_excerpt, output, rdf: archive), (
+          works: 3,
+          editions: 5,
+          skipped: 1,
+        ), reason: name);
+      }
+    },
+  );
+
+  test('rejects tar framing GNU tar rejects, and oversized members', () async {
+    final dir = tempDataDirectory();
+    final member = _tarMember('pg1.rdf', _rdf.readAsBytesSync());
+    for (final (name, tar, matcher) in [
+      (
+        'empty-pax-record',
+        [
+          ..._tarMember('PaxHeader', ascii.encode('0 \n'), type: 0x78),
+          ...member,
+          ..._endOfArchive,
+        ],
+        throwsFormatException,
+      ),
+      ('one-end-block', [...member, ...Uint8List(512)], throwsFormatException),
+      (
+        'oversized',
+        // Rejected from its header alone, before any of its body is buffered.
+        _tarMember('pg1.rdf', const [], size: 17 << 20),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('too large'),
+          ),
+        ),
+      ),
+    ]) {
+      final archive = await _bzip2('${dir.path}/$name.tar.bz2', tar);
+      final output = File('${dir.path}/$name.sqlite');
+      await expectLater(
+        importGutenbergFile(_excerpt, output, rdf: archive),
+        matcher,
+        reason: name,
+      );
+      expect(output.existsSync(), isFalse, reason: name);
+    }
+  });
+
+  test(
+    'a parse batch that fails while the archive is still read fails the import',
+    () async {
+      final dir = tempDataDirectory();
+      final bad = _tarMember('bad.rdf', utf8.encode('temporarily unavailable'));
+      final empty = _tarMember(
+        'empty.rdf',
+        utf8.encode(
+          '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>\n',
+        ),
+      );
+      // The first full batch is invalid and fails while a large skipped
+      // member keeps the reader busy, before the import awaits that batch.
+      const skipped = 48 << 20;
+      final archive = await _bzip2(
+        '${dir.path}/rdf-files.tar.bz2',
+        [
+          for (var i = 0; i < 64; i++) ...bad,
+          ..._tarMember('cover.bin', const [], size: skipped),
+        ],
+        [
+          Uint8List(skipped),
+          [
+            for (var i = 0; i < 256; i++) ...empty,
+            ..._tarMember('pg1.rdf', _rdf.readAsBytesSync()),
+            ..._endOfArchive,
+          ],
+        ],
+      );
+      final output = File('${dir.path}/catalog.sqlite');
+      await expectLater(
+        importGutenbergFile(_excerpt, output, rdf: archive),
+        throwsA(isA<Exception>()),
+      );
+      expect(output.existsSync(), isFalse);
     },
   );
 
@@ -527,4 +718,62 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
       }
     },
   );
+}
+
+final _endOfArchive = Uint8List(1024);
+
+/// One ustar member: header, then the body padded to whole blocks. [size]
+/// overrides the header's size field without changing the body.
+List<int> _tarMember(
+  String name,
+  List<int> body, {
+  int type = 0x30,
+  int? size,
+}) {
+  final header = Uint8List(512);
+  void put(int at, String value) =>
+      header.setRange(at, at + value.length, latin1.encode(value));
+  put(0, name);
+  put(100, '0000644\u0000');
+  put(108, '0000000\u0000');
+  put(116, '0000000\u0000');
+  put(124, '${(size ?? body.length).toRadixString(8).padLeft(11, '0')}\u0000');
+  put(136, '00000000000\u0000');
+  header[156] = type;
+  put(257, 'ustar\u0000');
+  put(263, '00');
+  header.fillRange(148, 156, 0x20);
+  final sum = header.fold(0, (total, byte) => total + byte);
+  put(148, '${sum.toRadixString(8).padLeft(6, '0')}\u0000 ');
+  return [...header, ...body, ...Uint8List((512 - body.length % 512) % 512)];
+}
+
+/// A POSIX extended header record, whose length counts its own digits.
+List<int> _paxRecord(String key, String value) {
+  final text = utf8.encode(' $key=$value\n');
+  var length = text.length + 1;
+  while ('$length'.length + text.length != length) {
+    length++;
+  }
+  return [...ascii.encode('$length'), ...text];
+}
+
+Future<File> _bzip2(
+  String path,
+  List<int> tar, [
+  List<List<int>> more = const [],
+]) async {
+  final process = await Process.start('bzip2', ['-c']);
+  final bytes = process.stdout.fold(
+    BytesBuilder(copy: false),
+    (all, chunk) => all..add(chunk),
+  );
+  process.stdin.add(tar);
+  for (final part in more) {
+    process.stdin.add(part);
+  }
+  await process.stdin.close();
+  final compressed = (await bytes).takeBytes();
+  expect(await process.exitCode, 0);
+  return File(path)..writeAsBytesSync(compressed);
 }
