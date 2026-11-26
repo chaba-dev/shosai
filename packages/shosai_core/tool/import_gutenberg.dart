@@ -647,27 +647,39 @@ final _readingEase = RegExp(r'^Reading ease score: (-?[0-9]+(?:\.[0-9]+)?)\b');
 
 /// "Austen, Jane" reads as "Jane Austen", "Wells, H. G. (Herbert George)" as
 /// "H. G. Wells" and "Beethoven, Ludwig van" as "Ludwig van Beethoven".
-/// A comma does not always separate surname and forename: qualified headings
-/// such as "Henry VIII, King of England" or "Pliny, the Younger" stay as
-/// catalogued, as does any other comma structure.
+/// Only a recognisable personal-name inversion is reordered: a surname of
+/// capitalised words, then forenames or initials, optionally with name
+/// particles. Corporate, qualified and uncertain headings, such as
+/// "Henry VIII, King of England", "Alfred A. Knopf, Inc." or
+/// "British Museum (Natural History). Department of Mineralogy", keep the
+/// heading exactly as catalogued.
 String readingOrder(String name) {
-  final plain = name.replaceAll(RegExp(r' \([^)]*\)'), '').trim();
-  final parts = plain.split(', ');
-  if (parts.length != 2 || parts.any((part) => part.trim().isEmpty)) {
-    return plain;
+  final parts = name.split(', ');
+  if (parts.length != 2) return name;
+  final surname = parts[0].trim();
+  // The only parenthesis a personal inversion carries expands its forenames.
+  final forenames = parts[1].replaceFirst(_expansion, '').trim();
+  bool words(String text, RegExp shape) {
+    final list = text.split(' ');
+    return shape.hasMatch(list.first) &&
+        list.every((word) => shape.hasMatch(word) || _particles.contains(word));
   }
-  final forenames = parts[1].trim().split(RegExp(r'\s+'));
-  final given =
-      _capitalised.hasMatch(forenames.first) &&
-      forenames.every(
-        (word) => _capitalised.hasMatch(word) || _particles.contains(word),
-      );
-  return given ? '${parts[1]} ${parts[0]}' : plain;
+
+  return words(surname, _nameWord) && words(forenames, _forenameWord)
+      ? '$forenames $surname'
+      : name;
 }
 
-final _capitalised = RegExp(r'^\p{Lu}', unicode: true);
-// Name particles that may follow a forename; titles such as "of" and
-// epithets such as "the Younger" do not qualify.
+final _expansion = RegExp(r' \([^()]*\)$');
+final _nameWord = RegExp(r"^\p{Lu}[\p{L}'’-]*$", unicode: true);
+// A forename, or initials such as "H." or "J.R.R."; not abbreviations such as
+// "Inc." or "Conn.", which are as likely to qualify a corporate heading.
+final _forenameWord = RegExp(
+  r"^(?:\p{Lu}[\p{L}'’-]*|(?:\p{Lu}\.)+)$",
+  unicode: true,
+);
+// Name particles that may follow a forename or start a surname; titles such
+// as "of" and epithets such as "the Younger" do not qualify.
 const _particles = {
   'da', 'de', 'del', 'della', 'der', 'di', 'du', 'la', 'le', //
   'ten', 'ter', 'van', 'von', 'zu',

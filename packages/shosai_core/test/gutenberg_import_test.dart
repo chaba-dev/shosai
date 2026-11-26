@@ -15,22 +15,31 @@ final _excerpt = File('test/fixtures/pg_catalog_excerpt.csv');
 final _rdf = File('test/fixtures/pg_catalog_excerpt.rdf');
 
 void main() {
-  test('only plain surname, forename headings are reordered', () {
-    // The last two are real Gutenberg agents (ebooks 32155 and 2811).
+  test('only personal-name inversions are reordered', () {
+    // Real Gutenberg agents that are not personal-name inversions, the first
+    // five from ebooks 32155, 2811, 53979, 69367 and 47147.
+    const kept = [
+      'Henry VIII, King of England',
+      'Pliny, the Younger',
+      'Alfred A. Knopf, Inc.',
+      'Anti-slavery Society of Meriden, Conn.',
+      'British Museum (Natural History). Department of Mineralogy',
+      'Chrétien, de Troyes',
+    ];
     expect(
       [
         'Austen, Jane',
         'Wells, H. G. (Herbert George)',
         'Beethoven, Ludwig van',
-        'Henry VIII, King of England',
-        'Pliny, the Younger',
+        'Tolkien, J.R.R.',
+        ...kept,
       ].map(readingOrder),
       [
         'Jane Austen',
         'H. G. Wells',
         'Ludwig van Beethoven',
-        'Henry VIII, King of England',
-        'Pliny, the Younger',
+        'J.R.R. Tolkien',
+        ...kept,
       ],
     );
   });
