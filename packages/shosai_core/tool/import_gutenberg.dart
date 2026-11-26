@@ -105,9 +105,28 @@ Future<void> _importRdf(Database db, File input) async {
       rights_line TEXT NOT NULL,
       PRIMARY KEY (ebook_id, variant)
     ) STRICT;
+    CREATE TEMP TABLE listed_details (
+      ebook_id TEXT PRIMARY KEY,
+      summary TEXT,
+      reading_ease INTEGER
+    ) STRICT;
+    CREATE TEMP TABLE listed_agents (
+      ebook_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      birth_year INTEGER,
+      death_year INTEGER,
+      PRIMARY KEY (ebook_id, name)
+    ) STRICT;
   ''');
   final insert = db.prepare(
     'INSERT INTO listed_epubs VALUES (?, ?, ?, ?, ?, ?, ?)',
+  );
+  final insertDetails = db.prepare(
+    'INSERT INTO listed_details VALUES (?, ?, ?)',
+  );
+  // An agent appears once per role; its name and years do not change.
+  final insertAgent = db.prepare(
+    'INSERT INTO listed_agents VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
   );
   db.execute('BEGIN');
   try {
@@ -180,6 +199,42 @@ Future<void> _importRdf(Database db, File input) async {
           throw FormatException('Invalid RDF ebook ID: $about');
         }
         final id = match[1]!;
+        // Sort repeated values so record and element order cannot change output.
+        List<String> texts(String name) => {
+          for (final element in ebook.findElements(
+            name,
+            namespaceUri: _pgNamespace,
+          ))
+            if (element.innerText.trim().isNotEmpty) element.innerText.trim(),
+        }.toList()..sort();
+        final summary = texts('marc520').join('\n\n');
+        final ease = texts('marc908')
+            .map((note) => _readingEase.firstMatch(note)?[1])
+            .nonNulls
+            .map((score) => double.parse(score).round())
+            .firstOrNull;
+        if (summary.isNotEmpty || ease != null) {
+          insertDetails.execute([id, summary.isEmpty ? null : summary, ease]);
+        }
+        final agents = ebook.findAllElements(
+          'agent',
+          namespaceUri: _pgNamespace,
+        );
+        for (final agent in agents) {
+          final name = agent
+              .getElement('name', namespaceUri: _pgNamespace)
+              ?.innerText
+              .trim();
+          if (name == null || name.isEmpty) continue;
+          int? year(String element) => int.tryParse(
+            agent
+                    .getElement(element, namespaceUri: _pgNamespace)
+                    ?.innerText
+                    .trim() ??
+                '',
+          );
+          insertAgent.execute([id, name, year('birthdate'), year('deathdate')]);
+        }
         final rights = {
           for (final statement in ebook.findElements(
             'rights',
@@ -267,6 +322,8 @@ Future<void> _importRdf(Database db, File input) async {
     rethrow;
   } finally {
     insert.close();
+    insertDetails.close();
+    insertAgent.close();
   }
 }
 
@@ -469,6 +526,47 @@ Future<({int works, int editions, int skipped})> _importRows(
           authorId,
           position++,
         ]);
+        // The CSV appends ", <years>" and " [<role>]" to the RDF agent name.
+        final named = author.replaceFirst(_role, '');
+        final agent = statements
+            .putIfAbsent(
+              'agent',
+              () => db.prepare('''
+                SELECT name, birth_year, death_year FROM listed_agents
+                WHERE ebook_id = ? AND (? = name OR substr(?, 1, length(name) + 2) = name || ', ')
+                ORDER BY length(name) DESC LIMIT 1
+              '''),
+            )
+            .select([id, named, named])
+            .firstOrNull;
+        if (agent != null) {
+          write(
+            'INSERT INTO author_details VALUES (?, ?, ?, ?) '
+            'ON CONFLICT (author_id) DO NOTHING',
+            [
+              authorId,
+              readingOrder(agent['name'] as String),
+              agent['birth_year'],
+              agent['death_year'],
+            ],
+          );
+        }
+      }
+      final details = statements
+          .putIfAbsent(
+            'details',
+            () => db.prepare(
+              'SELECT summary, reading_ease FROM listed_details WHERE ebook_id = ?',
+            ),
+          )
+          .select([id])
+          .firstOrNull;
+      if (details != null) {
+        write('INSERT INTO book_details VALUES (?, ?, ?)', [
+          work,
+          details['summary'],
+          details['reading_ease'],
+        ]);
       }
       final subjects = _values(field('Subjects'));
       for (final subject in subjects) {
@@ -544,6 +642,48 @@ Future<({int works, int editions, int skipped})> _importRows(
 }
 
 final _number = RegExp(r'^[1-9][0-9]*$');
+final _role = RegExp(r' \[[^\]]*\]$');
+final _readingEase = RegExp(r'^Reading ease score: (-?[0-9]+(?:\.[0-9]+)?)\b');
+
+/// "Austen, Jane" reads as "Jane Austen", "Wells, H. G. (Herbert George)" as
+/// "H. G. Wells" and "Beethoven, Ludwig van" as "Ludwig van Beethoven".
+/// Only a recognisable personal-name inversion is reordered: a surname of
+/// capitalised words, then forenames or initials, optionally with name
+/// particles. Corporate, qualified and uncertain headings, such as
+/// "Henry VIII, King of England", "Alfred A. Knopf, Inc." or
+/// "British Museum (Natural History). Department of Mineralogy", keep the
+/// heading exactly as catalogued.
+String readingOrder(String name) {
+  final parts = name.split(', ');
+  if (parts.length != 2) return name;
+  final surname = parts[0].trim();
+  // The only parenthesis a personal inversion carries expands its forenames.
+  final forenames = parts[1].replaceFirst(_expansion, '').trim();
+  bool words(String text, RegExp shape) {
+    final list = text.split(' ');
+    return shape.hasMatch(list.first) &&
+        list.every((word) => shape.hasMatch(word) || _particles.contains(word));
+  }
+
+  return words(surname, _nameWord) && words(forenames, _forenameWord)
+      ? '$forenames $surname'
+      : name;
+}
+
+final _expansion = RegExp(r' \([^()]*\)$');
+final _nameWord = RegExp(r"^\p{Lu}[\p{L}'’-]*$", unicode: true);
+// A forename, or initials such as "H." or "J.R.R."; not abbreviations such as
+// "Inc." or "Conn.", which are as likely to qualify a corporate heading.
+final _forenameWord = RegExp(
+  r"^(?:\p{Lu}[\p{L}'’-]*|(?:\p{Lu}\.)+)$",
+  unicode: true,
+);
+// Name particles that may follow a forename or start a surname; titles such
+// as "of" and epithets such as "the Younger" do not qualify.
+const _particles = {
+  'da', 'de', 'del', 'della', 'der', 'di', 'du', 'la', 'le', //
+  'ten', 'ter', 'van', 'von', 'zu',
+};
 
 // Exact LCSH genres only, when Gutenberg has not assigned a Browse category.
 const _subjectCategories = {

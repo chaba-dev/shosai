@@ -26,6 +26,15 @@ without a listed EPUB, preserves each listed variant and prefers EPUB3 when
 available. Labels distinguish EPUB3 from the older EPUB2 variants. Missing sizes
 stay unknown; missing rights retain the instruction to check Gutenberg.
 
+The same RDF pass supplies descriptive details. A work's `marc520` summary and
+the score in its `marc908` reading-ease note go into `book_details`; each
+author's RDF name, birth year and death year go into `author_details`, with
+the name in reading order (“Jane Austen”). Values the RDF does not supply stay
+absent. Gutenberg's `dcterms:issued` is its own release date, not first
+publication, so the catalog does not record a publication year.
+The source row carries Gutenberg's donation page as `support_url`; a source
+without one leaves it null, and the app then shows no Support action.
+
 The Nix shell supplies `gzip`, GNU `tar` and `bzip2`. The archive is streamed
 without extracting files to disk; neither the importer nor the app crawls book
 pages to discover variants. A malformed XML document, invalid EPUB URL or size,
@@ -37,9 +46,12 @@ previous build timestamp if nothing changed. An unchanged refresh therefore
 produces byte-identical files, including the manifest. It never edits the
 previous snapshot; CI can review the staged output before replacing it.
 
-The snapshot has `manifest.json` plus 24 fixed `<table>/<part>.json` files.
-Each UTF-8 JSON array has one row per line, with rows ordered by the keys in
-`catalogTables`. Editions occupy 16 partitions chosen by the first hex digit
+The snapshot has `manifest.json` plus 24 fixed `<table>/<part>.json` files
+for `catalogTables`, and 17 more for `optionalCatalogTables`. A manifest lists
+every partition of a descriptive table or none of it, so snapshots published
+before these tables still load, and earlier app versions verify the extra files
+but ignore them. Each UTF-8 JSON array has one row per line, with rows ordered
+by the table's `orderBy` keys. Editions and book details each occupy 16 partitions chosen by the first hex digit
 of SHA-256 of their work ID; each other table occupies one file. Adding a book
 does not move existing rows to another file. An export fails if any partition
 exceeds 24 MiB rather than changing file boundaries to meet Pages' 25 MiB limit.
