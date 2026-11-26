@@ -782,7 +782,7 @@ packages:
     source: hosted
     version: "1.10.2"
   sqlite3:
-    dependency: "direct overridden"
+    dependency: "direct dev"
     description:
       path: "third_party/sqlite3"
       relative: true

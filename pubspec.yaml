@@ -40,6 +40,8 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  # Catalog UI tests exercise an installed SQLite snapshot, not mocked queries.
+  sqlite3: ^3.5.2
   # The opt-in real-book corpus pass reads Dart retained heap through the VM
   # service (`getAllocationProfile`); the version is pinned by pubspec.lock.
   vm_service: ^15.3.0
@@ -50,6 +52,8 @@ flutter:
   # required even though the synthetic-package mode is gone, so the generated
   # AppLocalizations sources are written into lib/l10n and committed.
   generate: true
+  assets:
+    - assets/catalog/categories/
   fonts:
     # The app faces' source of truth is this repository's `assets/fonts/`, also
     # used by the packaging licenses. The website owns a separate copy. The `fonts/`
@@ -101,6 +105,7 @@ flutter:
     - fonts/LICENSE-Literata.txt
     - fonts/LICENSE-ShipporiMincho.txt
     - fonts/LICENSE-NotoSerifJP.txt
+    - assets/catalog/LICENSE-GUTENBERG.txt
 
 dependency_overrides:
   # Same 3.5.2 bindings and non-iOS binaries. iOS compiles SQLite 3.53.4

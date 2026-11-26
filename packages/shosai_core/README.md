@@ -51,6 +51,14 @@ imported; it does not fetch thumbnails or probe downloads. An RDF listing record
 what Gutenberg offered at the feed date, not a guarantee of current availability
 or permission in every jurisdiction.
 
+Donation support is configured per source with the existing nullable
+`sources.support_url`. Set it to the project's donation page when it accepts
+donations; leave it null otherwise. The app shows “Support {project}” beside
+“View at source” only for a configured URL, using the source's catalog name.
+The Gutenberg importer sets `https://www.gutenberg.org/donate/`. Existing
+snapshots retain their metadata until a regenerated snapshot is published and
+downloaded; changing the importer does not publish a catalog or alter a cache.
+
 ## Store
 
 `Store.open(path)` starts one worker isolate that owns the database's only

@@ -155,7 +155,7 @@ class _ShellSearchPaletteState extends State<ShellSearchPalette> {
         Divider(height: 1, thickness: 1, color: palette.line),
         Flexible(
           fit: phone ? FlexFit.tight : FlexFit.loose,
-          child: _ShellSearchResults(model: model, onChosen: widget.onChosen),
+          child: ShellSearchResults(model: model, onChosen: widget.onChosen),
         ),
       ],
     );
@@ -212,11 +212,17 @@ class _ShellSearchPaletteState extends State<ShellSearchPalette> {
 
 /// The palette's results: a hint before a query, then the notes group and
 /// one group per book, and a line while books are still searched.
-class _ShellSearchResults extends StatelessWidget {
-  const _ShellSearchResults({required this.model, required this.onChosen});
+class ShellSearchResults extends StatelessWidget {
+  const ShellSearchResults({
+    super.key,
+    required this.model,
+    required this.onChosen,
+    this.embedded = false,
+  });
 
   final ShellSearchModel model;
   final ValueChanged<ShellSearchChoice> onChosen;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -231,6 +237,14 @@ class _ShellSearchResults extends StatelessWidget {
       if (query.isEmpty)
         _ShellSearchLine(text: l10n.shellSearchHint)
       else ...[
+        for (final book in model.books)
+          ListTile(
+            title: Text(book.title, style: shellEditorialStyle(17, 24)),
+            subtitle: Text(book.author ?? ''),
+            leading: ShellFormatBadge(format: book.format),
+            trailing: const Icon(LucideIcons.chevronRight, size: 16),
+            onTap: () => onChosen((book, null)),
+          ),
         if (noteCount > 0) ...[
           _ShellSearchGroup(
             key: const ValueKey('shell-search-notes'),
@@ -278,7 +292,7 @@ class _ShellSearchResults extends StatelessWidget {
             key: const ValueKey('shell-search-busy'),
             text: l10n.shellSearchSearching,
           )
-        else if (noteCount == 0 && model.text.isEmpty)
+        else if (noteCount == 0 && model.text.isEmpty && model.books.isEmpty)
           _ShellSearchLine(
             key: const ValueKey('shell-search-empty'),
             text: l10n.shellSearchNoMatches(query),
@@ -288,6 +302,7 @@ class _ShellSearchResults extends StatelessWidget {
     return ListView(
       key: const ValueKey('shell-search-results'),
       shrinkWrap: true,
+      physics: embedded ? const NeverScrollableScrollPhysics() : null,
       padding: const EdgeInsets.symmetric(
         horizontal: ShosaiTokens.space2,
         vertical: ShosaiTokens.space2,

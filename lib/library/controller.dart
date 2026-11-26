@@ -128,6 +128,7 @@ class LibraryController implements Listenable {
   int _queryRevision = 0;
   int _activeEffects = 0;
   int _activeBusyEffects = 0;
+  int _activeLoadEffects = 0;
   int _adapterRevision = 0;
   int _cleanupRevision = 0;
   String? _displayedQuery;
@@ -595,6 +596,7 @@ class LibraryController implements Listenable {
       case _LibraryEffectFinished():
         _activeEffects -= 1;
         _activeBusyEffects -= 1;
+        if (message.loading) _activeLoadEffects -= 1;
         if (!_closing) {
           _emit(_model.copyWith(busy: _activeBusyEffects > 0));
         }
@@ -689,9 +691,10 @@ class LibraryController implements Listenable {
     );
   }
 
-  void _beginEffect({bool importing = false}) {
+  void _beginEffect({bool importing = false, bool loading = false}) {
     _activeEffects += 1;
     _activeBusyEffects += 1;
+    if (loading) _activeLoadEffects += 1;
     // Another effect may start while an import is still in flight (a search
     // change loads during one), so starting an effect never clears the import
     // state it did not start.
@@ -895,7 +898,7 @@ class LibraryController implements Listenable {
     _cancellations.add(cancellation);
     _foregroundCancellations.add(cancellation);
     _loadCancellations.add(cancellation);
-    _beginEffect();
+    _beginEffect(loading: true);
     // The load effect owns the collection's loading state: the skeleton shows
     // for a first-page load and the grid stays for an appended page, exactly as
     // the reference's `library_loading && library_offset == 0` branch does.
@@ -1044,7 +1047,7 @@ class LibraryController implements Listenable {
           ),
         );
       } finally {
-        dispatch(const _LibraryEffectFinished());
+        dispatch(const _LibraryEffectFinished(loading: true));
       }
     }());
   }
@@ -1258,7 +1261,9 @@ class LibraryController implements Listenable {
   }
 
   void _open(FlutterLibraryBook book) {
-    if (_closing || _model.busy) return;
+    // A read is independent of a shelf refresh, but not another reader or
+    // mutation. In particular Add's refresh must not swallow explicit Read.
+    if (_closing || _activeBusyEffects > _activeLoadEffects) return;
     _openReader(book);
   }
 

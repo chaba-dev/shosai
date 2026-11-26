@@ -1397,6 +1397,190 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pdfUnlockAction => 'PDF を開く';
 
   @override
+  String get catalogSearchPlaceholder => '本、ノート、無料の本を検索';
+
+  @override
+  String get catalogClearSearch => '検索を消去';
+
+  @override
+  String get catalogAll => 'すべて';
+
+  @override
+  String get catalogYourBooks => '自分の本';
+
+  @override
+  String get catalogYourNotes => '自分のノート';
+
+  @override
+  String get catalogFreeBooks => '無料の本';
+
+  @override
+  String get catalogAuthors => '著者';
+
+  @override
+  String get catalogBrowse => '無料の本を探す';
+
+  @override
+  String get catalogRecentSearches => '最近の検索';
+
+  @override
+  String catalogFromSources(String sources) {
+    return '提供元：$sources';
+  }
+
+  @override
+  String get catalogLanguage => '言語';
+
+  @override
+  String get catalogCategory => 'カテゴリ';
+
+  @override
+  String get catalogSource => '提供元';
+
+  @override
+  String get catalogUpdating => '無料の本のカタログを更新中…検索は続けられます。';
+
+  @override
+  String get catalogOffline => 'カタログを更新できませんでした。保存済みのカタログがあれば、オフラインでも使えます。';
+
+  @override
+  String get catalogReadFailed => 'カタログを読み込めませんでした。検索を開き直してお試しください。';
+
+  @override
+  String get catalogFirstDownload =>
+      'この端末で無料の本を探すには、インターネットに接続してカタログを取得してください。';
+
+  @override
+  String get catalogShowMore => 'さらに表示';
+
+  @override
+  String catalogBookCount(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString冊';
+  }
+
+  @override
+  String get catalogChooseEdition => '版を選ぶ';
+
+  @override
+  String catalogBytes(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countStringバイト';
+  }
+
+  @override
+  String get catalogEdition => '版';
+
+  @override
+  String catalogLanguageName(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'en': '英語',
+      'fr': 'フランス語',
+      'de': 'ドイツ語',
+      'fi': 'フィンランド語',
+      'nl': 'オランダ語',
+      'it': 'イタリア語',
+      'es': 'スペイン語',
+      'pt': 'ポルトガル語',
+      'la': 'ラテン語',
+      'el': 'ギリシャ語',
+      'sv': 'スウェーデン語',
+      'da': 'デンマーク語',
+      'eo': 'エスペラント',
+      'hu': 'ハンガリー語',
+      'ru': 'ロシア語',
+      'pl': 'ポーランド語',
+      'zh': '中国語',
+      'ja': '日本語',
+      'other': '$code',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String catalogReadingEase(int score) {
+    return '読みやすさ $score';
+  }
+
+  @override
+  String catalogYearBce(int year) {
+    return '紀元前$year年';
+  }
+
+  @override
+  String catalogMoreByAuthor(String author) {
+    return '$authorの他の作品';
+  }
+
+  @override
+  String catalogAllByAuthor(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return 'すべて（$countString）';
+  }
+
+  @override
+  String get catalogViewSource => '提供元で確認';
+
+  @override
+  String catalogSupportSource(String project) {
+    return '$projectを支援';
+  }
+
+  @override
+  String get catalogLinkFailed => '提供元を開けませんでした。もう一度お試しください。';
+
+  @override
+  String get catalogSaveTo => '保存先';
+
+  @override
+  String get catalogPrivateLibrary => 'この端末のプライベートライブラリ';
+
+  @override
+  String get catalogAdd => 'ライブラリに追加';
+
+  @override
+  String get catalogAdding => 'ダウンロードして追加中…';
+
+  @override
+  String get catalogCancelling => 'キャンセル中…';
+
+  @override
+  String get catalogCancelled => 'ダウンロードをキャンセルしました。';
+
+  @override
+  String get catalogAddFailed => '本を追加できませんでした。接続と保存先を確認して、もう一度お試しください。';
+
+  @override
+  String get catalogLocationChanged => '保存先が変更されました。追加する前に保存先をもう一度選んでください。';
+
+  @override
+  String get catalogLocationsFailed => '保存先を読み込めませんでした。';
+
+  @override
+  String get catalogLocationsLoading => '保存先を読み込み中…';
+
+  @override
+  String get catalogAdded => 'ライブラリに追加しました';
+
+  @override
+  String get catalogAlreadyAdded => 'ライブラリに追加済みです';
+
+  @override
+  String get catalogRead => '読む';
+
+  @override
+  String get catalogBackToSearch => '検索に戻る';
+
+  @override
   String editionLocations(int count) {
     return '$countか所';
   }

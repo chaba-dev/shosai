@@ -23,6 +23,7 @@ final class FolderLocations: NSObject {
     let scoped: Bool
     let temporary: URL?
     let destination: URL?
+    let createOnly: Bool
   }
 
   init(messenger: FlutterBinaryMessenger) {
@@ -44,6 +45,8 @@ final class FolderLocations: NSObject {
             [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(failure.code) { code = "missing" }
           else if failure.domain == NSPOSIXErrorDomain && [Int(EACCES), Int(EPERM)].contains(failure.code) { code = "revoked" }
           else if failure.domain == NSPOSIXErrorDomain && failure.code == Int(ENOENT) { code = "missing" }
+          else if (failure.domain == NSCocoaErrorDomain && failure.code == NSFileWriteFileExistsError) ||
+            (failure.domain == NSPOSIXErrorDomain && failure.code == Int(EEXIST)) { code = "conflict" }
           else { code = "offline" }
           DispatchQueue.main.async { result(FlutterError(code: code, message: "The folder could not be accessed.", details: nil)) }
         }
@@ -156,9 +159,13 @@ final class FolderLocations: NSObject {
         var coordinationError: NSError?
         var publicationError: Error?
         NSFileCoordinator().coordinate(writingItemAt: temporary, options: .forMoving,
-          writingItemAt: destination, options: .forReplacing, error: &coordinationError) { source, target in
+          writingItemAt: destination, options: handle.createOnly ? [] : .forReplacing, error: &coordinationError) { source, target in
             do {
-              if FileManager.default.fileExists(atPath: target.path) {
+              if handle.createOnly {
+                if renamex_np(source.path, target.path, UInt32(RENAME_EXCL)) != 0 {
+                  throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+              } else if FileManager.default.fileExists(atPath: target.path) {
                 _ = try FileManager.default.replaceItemAt(target, withItemAt: source)
               } else { try FileManager.default.moveItem(at: source, to: target) }
             } catch { publicationError = error }
@@ -175,7 +182,7 @@ final class FolderLocations: NSObject {
     // Apple bookmark access is reference counted per handle, not a global
     // permission to revoke. Forgetting the saved bookmark releases the grant.
     if call.method == "release" { return nil }
-    if call.method == "openRead" || call.method == "openWrite" {
+    if call.method == "openRead" || call.method == "openWrite" || call.method == "openCreate" {
       guard handles.count < 8 else { throw failure("unsupported") }
       let root = try resolve(grant)
       let started = root.startAccessingSecurityScopedResource()
@@ -208,7 +215,8 @@ final class FolderLocations: NSObject {
           destination = parent.appendingPathComponent(name)
         }
         let id = UUID().uuidString
-        handles[id] = Handle(file: file, root: root, scoped: started, temporary: temporary, destination: destination)
+        handles[id] = Handle(file: file, root: root, scoped: started, temporary: temporary, destination: destination,
+                             createOnly: call.method == "openCreate")
         return id
       } catch {
         if started { root.stopAccessingSecurityScopedResource() }
@@ -218,6 +226,13 @@ final class FolderLocations: NSObject {
     return try scoped(grant) { root, _ in
       switch call.method {
       case "refresh": return try bookmark(root)
+      case "createDirectory":
+        guard let name = args["name"] as? String, !name.isEmpty,
+          name != ".", name != "..", !name.contains("/"), !name.contains("\\"), !name.contains("\0") else { throw failure("unsupported") }
+        let parent = try child(root, args["directory"] as? String)
+        let folder = parent.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        return try entry(folder, root: root)
       case "stat":
         guard let key = args["key"] as? String else { throw failure("unsupported") }
         return try entry(child(root, key), root: root)

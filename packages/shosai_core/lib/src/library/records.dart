@@ -88,6 +88,16 @@ final class LibraryRecords {
     (db) => _commitReferenced(db, path, format, fingerprint, metadata),
   );
 
+  /// Join a verified referenced import to its durable provider associations.
+  /// The caller owns the enclosing transaction and supplies inspected metadata.
+  static Committed commitPublishedInTransaction(
+    Database db,
+    String path,
+    BookFormat format,
+    FileFingerprint fingerprint,
+    BookMetadata metadata,
+  ) => _commitReferenced(db, path, format, fingerprint, metadata) as Committed;
+
   /// Throw unless [destination] is free for a private copy of [hash].
   Future<void> checkDestinationOwner(String destination, String hash) =>
       _store.read((db) => _checkDestinationOwner(db, destination, hash));

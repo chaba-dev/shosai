@@ -168,7 +168,7 @@ final class DropboxClient {
 }
 
 final class DropboxLocation
-    implements LibraryLocation, RecursiveLibraryLocation {
+    implements LibrarySaveLocation, RecursiveLibraryLocation {
   const DropboxLocation(this.id, this.client);
 
   @override
@@ -302,6 +302,63 @@ final class DropboxLocation
     Stream<List<int>> bytes, {
     String? directory,
     CancellationToken? cancellation,
+  }) => _write(name, bytes, directory: directory, cancellation: cancellation);
+
+  @override
+  Future<LocationEntry> createFile(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) => _write(
+    name,
+    bytes,
+    directory: directory,
+    cancellation: cancellation,
+    createOnly: true,
+  );
+
+  @override
+  Future<LocationEntry> createDirectory(
+    String name, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) async {
+    if (name.isEmpty ||
+        name == '.' ||
+        name == '..' ||
+        name.contains('/') ||
+        name.contains('\\') ||
+        name.contains('\u0000')) {
+      throw const CoreException.invalidRequest('Invalid Dropbox folder name.');
+    }
+    var parent = directory ?? '';
+    if (parent.startsWith('id:')) {
+      final value = await client.rpc('files/get_metadata', {
+        'path': parent,
+      }, cancellation: cancellation);
+      parent = value['path_lower'] as String;
+    }
+    try {
+      final result = await client.rpc('files/create_folder_v2', {
+        'path': '$parent/$name',
+        'autorename': false,
+      }, cancellation: cancellation);
+      return _entry((result['metadata'] as Map).cast<String, dynamic>());
+    } on CoreException catch (error) {
+      if (error.kind != CoreErrorKind.conflict) rethrow;
+      final found = await stat('$parent/$name', cancellation: cancellation);
+      if (!found.isDirectory) rethrow;
+      return found;
+    }
+  }
+
+  Future<LocationEntry> _write(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+    bool createOnly = false,
   }) async {
     if (name.isEmpty ||
         name == '.' ||
@@ -310,6 +367,13 @@ final class DropboxLocation
         name.contains('\\') ||
         name.contains('\u0000')) {
       throw const CoreException.invalidRequest('Invalid Dropbox file name.');
+    }
+    var parent = directory ?? '';
+    if (createOnly && parent.startsWith('id:')) {
+      final value = await client.rpc('files/get_metadata', {
+        'path': parent,
+      }, cancellation: cancellation);
+      parent = value['path_lower'] as String;
     }
     // Upload sessions bound memory regardless of the caller's chunk sizes.
     // Only finish publishes a file; cancelled/failed sessions expire at Dropbox.
@@ -362,14 +426,14 @@ final class DropboxLocation
           {
             'cursor': {'session_id': sessionId, 'offset': offset},
             'commit': {
-              'path': '${directory ?? ''}/$name',
-              'mode': 'overwrite',
-              'autorename': false,
+              'path': '$parent/$name',
+              'mode': createOnly ? 'add' : 'overwrite',
+              'autorename': createOnly,
             },
           },
           upload: true,
           bytes: buffer.takeBytes(),
-          cancellation: cancellation,
+          cancellation: createOnly ? null : cancellation,
         ),
       );
     } finally {
@@ -384,6 +448,7 @@ LocationEntry _entry(Map<String, dynamic> value) => LocationEntry(
   isDirectory: value['.tag'] == 'folder',
   size: value['size'] as int?,
   revision: value['rev'] as String?,
+  dropboxContentHash: value['content_hash'] as String?,
   folderName: switch (value['path_display'] ?? value['path_lower']) {
     final String path when path.split('/').length > 2 => path.split(
       '/',
@@ -430,6 +495,9 @@ Future<Never> _failure(HttpClientResponse response) async {
   }
   final body = await _boundedJson(response);
   final error = body['error'];
+  if ((body['error_summary'] as String? ?? '').contains('conflict')) {
+    throw const CoreException.conflict('The Dropbox name is taken.');
+  }
   if (error is Map &&
       (error['path'] is Map) &&
       (error['path'] as Map)['.tag'] == 'not_found') {
