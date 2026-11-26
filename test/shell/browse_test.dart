@@ -1204,10 +1204,7 @@ void main() {
       expect(find.text('Pride and Prejudice'), findsWidgets);
       await capture(tester, 'catalog-desktop-results');
       await tester.tap(find.text('Pride and Prejudice').first);
-      await until(
-        tester,
-        () => find.text('Edition').evaluate().isNotEmpty,
-      );
+      await until(tester, () => find.text('Edition').evaluate().isNotEmpty);
       expect(
         find.text('Public domain in the USA. Check the law where you live.'),
         findsOneWidget,
@@ -1237,10 +1234,7 @@ void main() {
       expect(find.text('Edition'), findsNothing);
       expect(tester.testTextInput.hasAnyClients, isTrue);
       await tester.tap(find.text('Pride and Prejudice').first);
-      await until(
-        tester,
-        () => find.text('Edition').evaluate().isNotEmpty,
-      );
+      await until(tester, () => find.text('Edition').evaluate().isNotEmpty);
       await tester.tap(find.text('Back to Search'));
       await tester.pumpAndSettle();
       expect(
