@@ -506,11 +506,20 @@ void main() {
     );
   }
 
-  for (final dark in [false, true]) {
+  for (final (dark, layout, width, scale) in [
+    for (final dark in [false, true]) ...[
+      (dark, ShellLayout.phone, 390.0, 1.0),
+      (dark, ShellLayout.tablet, 800.0, 1.0),
+      (dark, ShellLayout.desktop, 1280.0, 1.0),
+      (dark, ShellLayout.desktop, 1280.0, 2.0),
+    ],
+  ]) {
     testWidgets(
-      'Add stays in details; only Read opens an identical existing book (dark: $dark)',
+      'Add stays in details; only Read opens an identical existing book (dark: $dark, layout: $layout, scale: $scale)',
       (tester) async {
-        const HarnessView(size: Size(390, 844)).apply(tester);
+        HarnessView(size: Size(width, 900), textScale: scale).apply(tester);
+        final name =
+            '${layout.name}-${dark ? 'dark' : 'light'}${scale == 1 ? '' : '-large'}';
         tester.platformDispatcher.platformBrightnessTestValue = dark
             ? Brightness.dark
             : Brightness.light;
@@ -531,7 +540,7 @@ void main() {
               body: ListenableBuilder(
                 listenable: controller,
                 builder: (_, _) => ShellBrowsePage(
-                  layout: ShellLayout.phone,
+                  layout: layout,
                   model: controller.model,
                   local: controller.local.model,
                   dispatch: controller.dispatch,
@@ -548,15 +557,33 @@ void main() {
               controller.model.details != null &&
               controller.model.saveOptions != null,
         );
+        final cover = find.byType(ShellGeneratedCover);
+        final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+        void expectCoverWidth(String label) {
+          if (layout == ShellLayout.phone) return;
+          final button = tester.getRect(find.widgetWithText(ShadButton, label));
+          final coverRect = tester.getRect(cover);
+          expect(button.left, closeTo(coverRect.left, 0.1));
+          expect(button.width, closeTo(coverRect.width, 0.1));
+        }
+
+        final saveTo = tester.getRect(find.text('Save to'));
+        if (layout == ShellLayout.phone) {
+          expect(saveTo.top, greaterThan(tester.getRect(picker).bottom));
+        } else {
+          expect(saveTo.top, greaterThan(tester.getRect(cover).bottom));
+          expect(saveTo.left, closeTo(tester.getRect(cover).left, 0.1));
+          expect(
+            tester.getRect(find.text('View at source')).left,
+            greaterThan(tester.getRect(cover).right),
+          );
+        }
         await tester.ensureVisible(find.text('Add to library'));
         await tester.pumpAndSettle();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-ready',
-        );
+        expectCoverWidth('Add to library');
+        await capture(tester, 'catalog-acquire-$name-ready');
         await tester.tap(find.text('Add to library'));
         await until(tester, () => controller.model.acquisition.busy);
-        final picker = find.byKey(const ValueKey('catalog-edition-picker'));
         await tester.ensureVisible(picker);
         await tester.pumpAndSettle();
         expect(tester.getSemantics(picker).flagsCollection.isButton, true);
@@ -568,16 +595,11 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(PopupMenuItem<int>), findsNothing);
         expect(controller.model.edition, 0);
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-edition-disabled',
-        );
+        await capture(tester, 'catalog-acquire-$name-edition-disabled');
         await tester.ensureVisible(find.text('Cancel'));
         await tester.pump();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-progress',
-        );
+        expectCoverWidth('Cancel');
+        await capture(tester, 'catalog-acquire-$name-progress');
         expect(opened, isNull);
         // Cancellation after publication must still report the committed book,
         // rather than pretend that a committed save was undone.
@@ -594,10 +616,8 @@ void main() {
         expect(changes, 1);
         await tester.ensureVisible(find.text('Read'));
         await tester.pumpAndSettle();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-existing',
-        );
+        expectCoverWidth('Read');
+        await capture(tester, 'catalog-acquire-$name-existing');
         await tester.tap(find.text('Read'));
         await tester.pump();
         expect(opened?.bookId, harnessLibraryBooks().first.bookId);
@@ -617,10 +637,8 @@ void main() {
         expect(controller.model.acquisition.locationChanged, false);
         await tester.ensureVisible(find.text('Add to library'));
         await tester.pumpAndSettle();
-        await capture(
-          tester,
-          'catalog-acquire-${dark ? 'dark' : 'light'}-failed',
-        );
+        expectCoverWidth('Add to library');
+        await capture(tester, 'catalog-acquire-$name-failed');
         // An old completion cannot replace the new book's acquisition state.
         bridge.pending = Completer<CatalogAddedBook>();
         controller.dispatch(const BrowseAddRequested());
@@ -636,6 +654,199 @@ void main() {
         );
         expect(controller.model.acquisition.result, isNull);
         await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  for (final dark in [false, true]) {
+    for (final (width, scale) in [(600.0, 1.0), (800.0, 2.0)]) {
+      testWidgets(
+        'source actions wrap within the framed tablet (dark: $dark, width: $width, scale: $scale)',
+        (tester) async {
+          HarnessView(size: Size(width, 1000), textScale: scale).apply(tester);
+          tester.platformDispatcher.platformBrightnessTestValue = dark
+              ? Brightness.dark
+              : Brightness.light;
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
+          );
+          final details = await tester.runAsync(() => catalog.book('0'));
+          final messages = <BrowseMessage>[];
+          await tester.pumpWidget(
+            productionShell(
+              home: Scaffold(
+                body: ShellFrame(
+                  layout: ShellLayout.tablet,
+                  model: const ShellModel(place: ShellPlace.search),
+                  covers: const {},
+                  actions: ShellActions(
+                    selectPlace: (_) {},
+                    openBook: (_) {},
+                    closeBook: (_) {},
+                    addBooks: null,
+                    loadCover: (_) => false,
+                  ),
+                  child: ShellBrowsePage(
+                    layout: ShellLayout.tablet,
+                    model: BrowseModel(details: details),
+                    local: const ShellSearchModel(),
+                    dispatch: messages.add,
+                    onChosen: (_) {},
+                  ),
+                ),
+              ),
+            ),
+          );
+          for (final (name, label, url) in [
+            ('source', 'View at source', details!.editions.first.sourceUrl),
+            (
+              'support',
+              'Support this source',
+              details.editions.first.supportUrl,
+            ),
+          ]) {
+            final button = find.widgetWithText(ShadButton, label);
+            await tester.ensureVisible(button);
+            await tester.pumpAndSettle();
+            await capture(
+              tester,
+              'catalog-framed-${width.toInt()}-${dark ? 'dark' : 'light'}-$name',
+            );
+            final bounds = tester.getRect(button);
+            expect(bounds.height, greaterThanOrEqualTo(44));
+            expect(bounds.right, lessThanOrEqualTo(width));
+            await tester.tap(button);
+            expect((messages.last as BrowseLinkRequested).url, url);
+          }
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+  }
+
+  for (final dark in [false, true]) {
+    testWidgets(
+      'catalog failures are announced in danger, not neutral statuses (dark: $dark)',
+      (tester) async {
+        const HarnessView(size: Size(800, 900)).apply(tester);
+        tester.platformDispatcher.platformBrightnessTestValue = dark
+            ? Brightness.dark
+            : Brightness.light;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final semantics = tester.ensureSemantics();
+        final details = await tester.runAsync(() => catalog.book('0'));
+        final options = await CatalogHarnessBridge(
+          catalog,
+        ).catalogSaveOptions();
+        final book = BrowseModel(details: details, saveOptions: options);
+        for (final (name, model, message, error) in [
+          (
+            'catalog',
+            const BrowseModel(failed: true),
+            'The catalog could not be read. Leave Search and try again.',
+            true,
+          ),
+          (
+            'details',
+            const BrowseModel(detailFailed: true),
+            'The catalog could not be read. Leave Search and try again.',
+            true,
+          ),
+          (
+            'link',
+            book.copyWith(linkFailed: true),
+            'The source could not be opened. Try again.',
+            true,
+          ),
+          (
+            'locations',
+            book.copyWith(saveOptions: () => null),
+            'Save locations could not be loaded.',
+            true,
+          ),
+          (
+            'changed',
+            book.copyWith(
+              acquisition: const BrowseAcquisition(
+                failed: true,
+                locationChanged: true,
+              ),
+            ),
+            'The save location changed. Choose a save location again before adding.',
+            true,
+          ),
+          (
+            'add',
+            book.copyWith(acquisition: const BrowseAcquisition(failed: true)),
+            'The book could not be added. Check your connection and save location, then try again.',
+            true,
+          ),
+          (
+            'cancelled',
+            book.copyWith(
+              acquisition: const BrowseAcquisition(cancelled: true),
+            ),
+            'Download cancelled.',
+            false,
+          ),
+          (
+            'loading',
+            book.copyWith(saveOptions: () => null, optionsBusy: true),
+            'Loading save locations…',
+            false,
+          ),
+          (
+            'progress',
+            book.copyWith(
+              acquisition: const BrowseAcquisition(
+                busy: true,
+                received: 4096,
+                total: 8192,
+              ),
+            ),
+            'Downloading and adding…',
+            false,
+          ),
+        ]) {
+          await tester.pumpWidget(
+            productionShell(
+              home: Scaffold(
+                body: ShellBrowsePage(
+                  layout: ShellLayout.tablet,
+                  model: model,
+                  local: const ShellSearchModel(),
+                  dispatch: (_) {},
+                  onChosen: (_) {},
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final text = find.text(message);
+          expect(text, findsOneWidget, reason: name);
+          await tester.ensureVisible(text);
+          await tester.pumpAndSettle();
+          final danger = ShadTheme.of(
+            tester.element(text),
+          ).colorScheme.destructive;
+          final style = DefaultTextStyle.of(
+            tester.element(text),
+          ).style.merge(tester.widget<Text>(text).style);
+          expect(style.color, error ? danger : isNot(danger), reason: name);
+          if (error) {
+            expect(
+              tester.getSemantics(text).flagsCollection.isLiveRegion,
+              isTrue,
+              reason: name,
+            );
+          }
+          await capture(
+            tester,
+            'catalog-error-${dark ? 'dark' : 'light'}-$name',
+          );
+          await tester.pumpWidget(const SizedBox());
+        }
+        semantics.dispose();
       },
     );
   }

@@ -486,7 +486,12 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
             if (model.busy)
               _status(l10n.shellSearchSearching)
             else if (model.failed)
-              _status(l10n.catalogReadFailed)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: ShosaiTokens.space3,
+                ),
+                child: _CatalogError(l10n.catalogReadFailed),
+              )
             else if ((catalog &&
                     model.books.isEmpty &&
                     (!discovery || !model.installed)) ||
@@ -830,6 +835,12 @@ class _CatalogBookPage extends StatelessWidget {
       offset: 4,
       radius: BorderRadius.circular(ShosaiTokens.radiusSm + 4),
     );
+    final sourceButtonConstraints = BoxConstraints(
+      minHeight: math.max(
+        ShosaiTokens.sizeTouchTarget,
+        shosaiShadButtonHeight(context),
+      ),
+    );
     Widget editionLabel(CatalogEdition edition, {bool selected = false}) =>
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1060,36 +1071,41 @@ class _CatalogBookPage extends StatelessWidget {
                 const SizedBox(height: ShosaiTokens.space3),
                 Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: ShadButton.outline(
-                    height: math.max(
-                      ShosaiTokens.sizeTouchTarget,
-                      shosaiShadButtonHeight(context),
-                    ),
-                    onPressed: () => dispatch(
-                      BrowseLinkRequested(
-                        details.editions[model.edition].sourceUrl,
+                  child: ConstrainedBox(
+                    constraints: sourceButtonConstraints,
+                    child: ShadButton.outline(
+                      height: 0,
+                      onPressed: () => dispatch(
+                        BrowseLinkRequested(
+                          details.editions[model.edition].sourceUrl,
+                        ),
                       ),
+                      child: Flexible(child: Text(l10n.catalogViewSource)),
                     ),
-                    child: Text(l10n.catalogViewSource),
                   ),
                 ),
                 if (details.editions[model.edition].supportUrl case final url?)
                   Align(
                     alignment: AlignmentDirectional.centerStart,
-                    child: ShadButton.ghost(
-                      height: math.max(
-                        ShosaiTokens.sizeTouchTarget,
-                        shosaiShadButtonHeight(context),
+                    child: ConstrainedBox(
+                      constraints: sourceButtonConstraints,
+                      child: ShadButton.ghost(
+                        height: 0,
+                        onPressed: () => dispatch(BrowseLinkRequested(url)),
+                        child: Flexible(child: Text(l10n.catalogSupportSource)),
                       ),
-                      onPressed: () => dispatch(BrowseLinkRequested(url)),
-                      child: Text(l10n.catalogSupportSource),
                     ),
                   ),
-                if (model.linkFailed) Text(l10n.catalogLinkFailed),
+                if (model.linkFailed) _CatalogError(l10n.catalogLinkFailed),
               ],
-              const SizedBox(height: ShosaiTokens.space5),
-              if (details.editions.isNotEmpty)
-                _CatalogAcquisitionControls(model: model, dispatch: dispatch),
+              if (phone && details.editions.isNotEmpty) ...[
+                const SizedBox(height: ShosaiTokens.space5),
+                _CatalogAcquisitionControls(
+                  model: model,
+                  dispatch: dispatch,
+                  phone: phone,
+                ),
+              ],
             ],
           );
     return PopScope(
@@ -1121,7 +1137,7 @@ class _CatalogBookPage extends StatelessWidget {
               ),
               const SizedBox(height: ShosaiTokens.space5),
               if (model.detailBusy) Text(l10n.shellSearchSearching),
-              if (model.detailFailed) Text(l10n.catalogReadFailed),
+              if (model.detailFailed) _CatalogError(l10n.catalogReadFailed),
               if (details != null)
                 if (phone) ...[
                   Center(
@@ -1138,7 +1154,20 @@ class _CatalogBookPage extends StatelessWidget {
                     children: [
                       SizedBox(
                         width: 200,
-                        child: _CatalogCover(book: details.book),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _CatalogCover(book: details.book),
+                            if (details.editions.isNotEmpty) ...[
+                              const SizedBox(height: ShosaiTokens.space5),
+                              _CatalogAcquisitionControls(
+                                model: model,
+                                dispatch: dispatch,
+                                phone: phone,
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                       const SizedBox(width: ShosaiTokens.space6),
                       Expanded(child: metadata),
@@ -1187,13 +1216,33 @@ class _CatalogEditionMenuShape extends RoundedRectangleBorder {
   }
 }
 
+class _CatalogError extends StatelessWidget {
+  const _CatalogError(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Text(
+      message,
+      style: shellInterfaceStyle(
+        14,
+        20,
+      ).copyWith(color: ShadTheme.of(context).colorScheme.destructive),
+    ),
+  );
+}
+
 class _CatalogAcquisitionControls extends StatelessWidget {
   const _CatalogAcquisitionControls({
     required this.model,
     required this.dispatch,
+    required this.phone,
   });
   final BrowseModel model;
   final ValueChanged<BrowseMessage> dispatch;
+  final bool phone;
 
   @override
   Widget build(BuildContext context) {
@@ -1203,9 +1252,12 @@ class _CatalogAcquisitionControls extends StatelessWidget {
     final selected = options?.locations
         .where((g) => g.id == options.selected)
         .firstOrNull;
-    final height = math.max(
-      ShosaiTokens.sizeTouchTarget,
-      shosaiShadButtonHeight(context),
+    final buttonConstraints = BoxConstraints(
+      minWidth: phone ? 0 : double.infinity,
+      minHeight: math.max(
+        ShosaiTokens.sizeTouchTarget,
+        shosaiShadButtonHeight(context),
+      ),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1221,28 +1273,34 @@ class _CatalogAcquisitionControls extends StatelessWidget {
           const SizedBox(height: ShosaiTokens.space3),
           Align(
             alignment: AlignmentDirectional.centerStart,
-            child: ShadButton(
-              height: height,
-              onPressed: () => dispatch(const BrowseReadRequested()),
-              child: Text(l10n.catalogRead),
+            child: ConstrainedBox(
+              constraints: buttonConstraints,
+              child: ShadButton(
+                height: 0,
+                onPressed: () => dispatch(const BrowseReadRequested()),
+                child: Flexible(child: Text(l10n.catalogRead)),
+              ),
             ),
           ),
         ] else ...[
           Text(l10n.catalogSaveTo, style: shellInterfaceStyle(13, 20)),
           const SizedBox(height: ShosaiTokens.space2),
           if (options == null) ...[
-            Text(
-              model.optionsBusy
-                  ? l10n.catalogLocationsLoading
-                  : l10n.catalogLocationsFailed,
-            ),
+            if (model.optionsBusy)
+              Text(l10n.catalogLocationsLoading)
+            else
+              _CatalogError(l10n.catalogLocationsFailed),
             if (!model.optionsBusy)
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: ShadButton.outline(
-                  height: height,
-                  onPressed: () => dispatch(const BrowseSaveOptionsRequested()),
-                  child: Text(l10n.readerRetry),
+                child: ConstrainedBox(
+                  constraints: buttonConstraints,
+                  child: ShadButton.outline(
+                    height: 0,
+                    onPressed: () =>
+                        dispatch(const BrowseSaveOptionsRequested()),
+                    child: Flexible(child: Text(l10n.readerRetry)),
+                  ),
                 ),
               ),
           ] else ...[
@@ -1305,35 +1363,42 @@ class _CatalogAcquisitionControls extends StatelessWidget {
               const SizedBox(height: ShosaiTokens.space3),
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: ShadButton.outline(
-                  height: height,
-                  onPressed: state.cancelling
-                      ? null
-                      : () => dispatch(const BrowseAddCancelled()),
-                  child: Text(l10n.readerNoteCancel),
+                child: ConstrainedBox(
+                  constraints: buttonConstraints,
+                  child: ShadButton.outline(
+                    height: 0,
+                    onPressed: state.cancelling
+                        ? null
+                        : () => dispatch(const BrowseAddCancelled()),
+                    child: Flexible(child: Text(l10n.readerNoteCancel)),
+                  ),
                 ),
               ),
             ] else ...[
               if (state.failed || state.cancelled) ...[
-                Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    state.cancelled
-                        ? l10n.catalogCancelled
-                        : state.locationChanged
+                if (state.cancelled)
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(l10n.catalogCancelled),
+                  )
+                else
+                  _CatalogError(
+                    state.locationChanged
                         ? l10n.catalogLocationChanged
                         : l10n.catalogAddFailed,
                   ),
-                ),
                 const SizedBox(height: ShosaiTokens.space3),
               ],
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: ShadButton(
-                  height: height,
-                  enabled: !model.locationBusy && !state.locationChanged,
-                  onPressed: () => dispatch(const BrowseAddRequested()),
-                  child: Text(l10n.catalogAdd),
+                child: ConstrainedBox(
+                  constraints: buttonConstraints,
+                  child: ShadButton(
+                    height: 0,
+                    enabled: !model.locationBusy && !state.locationChanged,
+                    onPressed: () => dispatch(const BrowseAddRequested()),
+                    child: Flexible(child: Text(l10n.catalogAdd)),
+                  ),
                 ),
               ),
             ],
