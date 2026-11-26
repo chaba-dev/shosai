@@ -1755,6 +1755,17 @@ void main() {
       await tester.tap(find.text('Pride and Prejudice').first);
       await until(tester, () => controller.model.details != null);
       await capture(tester, 'catalog-$name-book');
+      // Two England headings collapse to one tag; the full heading is kept
+      // for screen readers.
+      expect(find.text('England'), findsOneWidget);
+      expect(find.text('England -- Fiction'), findsNothing);
+      expect(find.text('Love stories'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Semantics && w.properties.label == 'England -- Fiction',
+        ),
+        findsOneWidget,
+      );
       expect(find.text('Project Gutenberg · Without images'), findsNothing);
       final picker = find.byKey(const ValueKey('catalog-edition-picker'));
       await tester.ensureVisible(picker);
