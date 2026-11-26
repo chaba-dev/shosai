@@ -153,6 +153,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Keep older catalogs searchable and links accessible (#360)
 - *(shell)* Keep link focus visible to assistive technology (#361)
 - *(catalog)* Restore new Gutenberg releases and speed up the RDF import (#362)
+- *(catalog)* Use the independent catalog endpoint (#363)
 
 ### 🚜 Refactor
 
