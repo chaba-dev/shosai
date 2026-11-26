@@ -1,5 +1,8 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:async/async.dart';
 import 'package:shosai_core/catalog.dart';
@@ -26,9 +29,7 @@ Future<void> main(List<String> args) async {
       '<pg_catalog.csv[.gz]> <rdf-files.tar.bz2|catalog.rdf> <new-catalog.sqlite>',
     );
     stderr.writeln('Inputs: $_base/cache/epub/feeds/');
-    stderr.writeln(
-      'Compressed inputs require gzip, GNU tar and bzip2 on PATH.',
-    );
+    stderr.writeln('Compressed inputs require gzip and bzip2 on PATH.');
     exitCode = 64;
     return;
   }
@@ -39,9 +40,9 @@ Future<void> main(List<String> args) async {
       rdf: File(args[1]),
     );
     stdout.writeln(
-      'Imported ${result.works} works and ${result.editions} '
-      'RDF-listed EPUB editions; skipped ${result.skipped} non-text records '
-      'or records without a listed EPUB.',
+      'Imported ${result.works} works and ${result.editions} EPUB editions, '
+      'listed in the RDF or inferred for new releases; skipped '
+      '${result.skipped} non-text records or records without an EPUB.',
     );
   } on Exception catch (error) {
     stderr.writeln('Gutenberg import failed: $error');
@@ -128,190 +129,48 @@ Future<void> _importRdf(Database db, File input) async {
   final insertAgent = db.prepare(
     'INSERT INTO listed_agents VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
   );
+  final _RdfSink sink = (
+    epub: insert.execute,
+    detail: insertDetails.execute,
+    agent: insertAgent.execute,
+  );
+  void write(_RdfRows rows) {
+    rows.epubs.forEach(sink.epub);
+    rows.details.forEach(sink.detail);
+    rows.agents.forEach(sink.agent);
+  }
+
   db.execute('BEGIN');
   try {
-    final documents = input.path.endsWith('.tar.bz2')
-        ? _readRdfArchive(input)
-        : Stream.value(input.openRead());
-    // Validate each complete member, retaining only one ebook subtree at a time.
-    final nodes = documents.asyncExpand(
-      (bytes) => bytes
-          .transform(utf8.decoder)
-          .toXmlEvents(
-            validateDocument: true,
-            validateNesting: true,
-            validateNamespace: true,
-            withNamespace: true,
-            withParent: true,
-          )
-          .tapEachEvent(
-            onStartElement: (event) {
-              final attributes = <(String?, String)>{};
-              for (final attribute in event.attributes) {
-                if (!attributes.add((
-                  attribute.namespacePrefix == null
-                      ? null
-                      : attribute.namespaceUri,
-                  attribute.localName,
-                ))) {
-                  throw const FormatException('Duplicate RDF attribute');
-                }
-              }
-              if (event.parent == null &&
-                  (event.localName != 'RDF' ||
-                      event.namespaceUri != _rdfNamespace)) {
-                throw const FormatException('Expected an RDF document root');
-              }
-            },
-            onText: (event) {
-              if (event.parent == null &&
-                  event.value.codeUnits.any(
-                    (code) =>
-                        code != 0x20 &&
-                        code != 0x09 &&
-                        code != 0x0a &&
-                        code != 0x0d,
-                  )) {
-                throw const FormatException('Unexpected text outside RDF root');
-              }
-            },
-            onCDATA: (event) {
-              if (event.parent == null) {
-                throw const FormatException(
-                  'Unexpected CDATA outside RDF root',
-                );
-              }
-            },
-          )
-          .selectSubtreeEvents(
-            (event) =>
-                event.localName == 'ebook' &&
-                event.namespaceUri == _pgNamespace,
-          )
-          .normalizeEvents()
-          .toXmlNodes(),
-    );
-    await for (final batch in nodes) {
-      for (final ebook in batch.whereType<XmlElement>()) {
-        final about = ebook.getAttribute('about', namespaceUri: _rdfNamespace);
-        final match = RegExp(r'^ebooks/([1-9][0-9]*)$').firstMatch(about ?? '');
-        if (match == null) {
-          throw FormatException('Invalid RDF ebook ID: $about');
-        }
-        final id = match[1]!;
-        // Sort repeated values so record and element order cannot change output.
-        List<String> texts(String name) => {
-          for (final element in ebook.findElements(
-            name,
-            namespaceUri: _pgNamespace,
-          ))
-            if (element.innerText.trim().isNotEmpty) element.innerText.trim(),
-        }.toList()..sort();
-        final summary = texts('marc520').join('\n\n');
-        final ease = texts('marc908')
-            .map((note) => _readingEase.firstMatch(note)?[1])
-            .nonNulls
-            .map((score) => double.parse(score).round())
-            .firstOrNull;
-        if (summary.isNotEmpty || ease != null) {
-          insertDetails.execute([id, summary.isEmpty ? null : summary, ease]);
-        }
-        final agents = ebook.findAllElements(
-          'agent',
-          namespaceUri: _pgNamespace,
-        );
-        for (final agent in agents) {
-          final name = agent
-              .getElement('name', namespaceUri: _pgNamespace)
-              ?.innerText
-              .trim();
-          if (name == null || name.isEmpty) continue;
-          int? year(String element) => int.tryParse(
-            agent
-                    .getElement(element, namespaceUri: _pgNamespace)
-                    ?.innerText
-                    .trim() ??
-                '',
-          );
-          insertAgent.execute([id, name, year('birthdate'), year('deathdate')]);
-        }
-        final rights = {
-          for (final statement in ebook.findElements(
-            'rights',
-            namespaceUri: _dcNamespace,
-          ))
-            if (statement.innerText.trim().isNotEmpty)
-              statement.innerText.trim(),
-        }.toList()..sort();
-        for (final format in ebook.findElements(
-          'hasFormat',
-          namespaceUri: _dcNamespace,
-        )) {
-          final file = format.getElement('file', namespaceUri: _pgNamespace);
-          if (file == null) continue;
-          final epub = file
-              .findElements('format', namespaceUri: _dcNamespace)
-              .any(
-                (format) => format.descendants.whereType<XmlElement>().any(
-                  (value) =>
-                      value.name.local == 'value' &&
-                      value.namespaceUri == _rdfNamespace &&
-                      value.innerText.trim() == 'application/epub+zip',
-                ),
-              );
-          if (!epub) continue;
-          final url = Uri.tryParse(
-            file.getAttribute('about', namespaceUri: _rdfNamespace) ?? '',
-          );
-          if (url == null ||
-              url.scheme != 'https' ||
-              url.host != 'www.gutenberg.org' ||
-              url.userInfo.isNotEmpty ||
-              url.hasPort ||
-              url.hasQuery ||
-              url.hasFragment ||
-              url.pathSegments.isEmpty) {
-            throw FormatException('Invalid RDF EPUB URL: $url');
-          }
-          final (variant, label, preference) = switch (url.path) {
-            final path when path == '/ebooks/$id.epub3.images' => (
-              'images',
-              'EPUB3 with images',
-              0,
-            ),
-            final path when path == '/ebooks/$id.epub.images' => (
-              'epub2-images',
-              'EPUB2 with images',
-              1,
-            ),
-            final path when path == '/ebooks/$id.epub.noimages' => (
-              'noimages',
-              'EPUB2 without images',
-              2,
-            ),
-            _ => (url.toString(), 'EPUB · ${url.pathSegments.last}', 3),
-          };
-          final extent = file
-              .getElement('extent', namespaceUri: _dcNamespace)
-              ?.innerText
-              .trim();
-          final size = extent == null ? null : int.tryParse(extent);
-          if (extent != null && (size == null || size <= 0)) {
-            throw FormatException('Invalid RDF EPUB size: $extent');
-          }
-          insert.execute([
-            id,
-            variant,
-            label,
-            preference,
-            url.toString(),
-            size,
-            rights.isEmpty
-                ? 'Rights not listed in the offline catalog. Check Project Gutenberg.'
-                : rights.join('\n'),
-          ]);
+    if (input.path.endsWith('.tar.bz2')) {
+      // Parse batches of members on other isolates, and insert their rows in
+      // archive order so the tables fill exactly as a serial pass would.
+      // Results are captured when queued: a batch that fails before its turn
+      // must fail the import through this loop, not as an unhandled error.
+      final pending = Queue<Future<Result<_RdfRows>>>();
+      var batch = <Uint8List>[];
+      var batchBytes = 0;
+      void queue() {
+        pending.add(Result.capture(_parseRdfInIsolate(batch)));
+        batch = [];
+        batchBytes = 0;
+      }
+
+      await for (final member in _readRdfArchive(input)) {
+        batch.add(member);
+        batchBytes += member.length;
+        if (batch.length < 64 && batchBytes < _maxBatchBytes) continue;
+        queue();
+        if (pending.length > Platform.numberOfProcessors) {
+          write(await Result.release(pending.removeFirst()));
         }
       }
+      if (batch.isNotEmpty) queue();
+      while (pending.isNotEmpty) {
+        write(await Result.release(pending.removeFirst()));
+      }
+    } else {
+      await _parseRdf([input.openRead()], sink);
     }
     if (db.select('SELECT 1 FROM listed_epubs LIMIT 1').isEmpty) {
       throw const FormatException('No EPUB files listed in Gutenberg RDF');
@@ -327,32 +186,355 @@ Future<void> _importRdf(Database db, File input) async {
   }
 }
 
-Stream<Stream<List<int>>> _readRdfArchive(File input) async* {
-  // GNU tar prefixes each regular member with its byte length. No archive paths
-  // are written to disk, and even an invalid member cannot hide in its neighbor.
-  final process = await Process.start('tar', [
-    '--extract',
-    r'''--to-command=printf '%020d' "$TAR_SIZE"; cat''',
-    '--bzip2',
-    '--file',
-    input.absolute.path,
-    '--wildcards',
-    '*.rdf',
-  ]);
+/// Receives the rows RDF documents contribute to the temporary tables, in the
+/// order the documents and their elements list them.
+typedef _RdfSink = ({
+  void Function(List<Object?>) epub,
+  void Function(List<Object?>) detail,
+  void Function(List<Object?>) agent,
+});
+
+typedef _RdfRows = ({
+  List<List<Object?>> epubs,
+  List<List<Object?>> details,
+  List<List<Object?>> agents,
+});
+
+/// Batches flush at 64 members or this many bytes, whichever comes first.
+const _maxBatchBytes = 4 << 20;
+
+/// Gutenberg's RDF documents are tens of kilobytes; a larger member is not one.
+const _maxRdfMemberBytes = 16 << 20;
+
+Future<_RdfRows> _parseRdfInIsolate(List<Uint8List> members) => Isolate.run(
+  () async {
+    final _RdfRows rows = (epubs: [], details: [], agents: []);
+    await _parseRdf(
+      [for (final member in members) Stream.value(member)],
+      (epub: rows.epubs.add, detail: rows.details.add, agent: rows.agents.add),
+    );
+    return rows;
+  },
+);
+
+Future<void> _parseRdf(
+  Iterable<Stream<List<int>>> documents,
+  _RdfSink sink,
+) async {
+  // Validate each complete member, retaining only one ebook subtree at a time.
+  final nodes = Stream.fromIterable(documents).asyncExpand(
+    (bytes) => bytes
+        .transform(utf8.decoder)
+        .toXmlEvents(
+          validateDocument: true,
+          validateNesting: true,
+          validateNamespace: true,
+          withNamespace: true,
+          withParent: true,
+        )
+        .tapEachEvent(
+          onStartElement: (event) {
+            final attributes = <(String?, String)>{};
+            for (final attribute in event.attributes) {
+              if (!attributes.add((
+                attribute.namespacePrefix == null
+                    ? null
+                    : attribute.namespaceUri,
+                attribute.localName,
+              ))) {
+                throw const FormatException('Duplicate RDF attribute');
+              }
+            }
+            if (event.parent == null &&
+                (event.localName != 'RDF' ||
+                    event.namespaceUri != _rdfNamespace)) {
+              throw const FormatException('Expected an RDF document root');
+            }
+          },
+          onText: (event) {
+            if (event.parent == null &&
+                event.value.codeUnits.any(
+                  (code) =>
+                      code != 0x20 &&
+                      code != 0x09 &&
+                      code != 0x0a &&
+                      code != 0x0d,
+                )) {
+              throw const FormatException('Unexpected text outside RDF root');
+            }
+          },
+          onCDATA: (event) {
+            if (event.parent == null) {
+              throw const FormatException('Unexpected CDATA outside RDF root');
+            }
+          },
+        )
+        .selectSubtreeEvents(
+          (event) =>
+              event.localName == 'ebook' && event.namespaceUri == _pgNamespace,
+        )
+        .normalizeEvents()
+        .toXmlNodes(),
+  );
+  await for (final batch in nodes) {
+    for (final ebook in batch.whereType<XmlElement>()) {
+      final about = ebook.getAttribute('about', namespaceUri: _rdfNamespace);
+      final match = RegExp(r'^ebooks/([1-9][0-9]*)$').firstMatch(about ?? '');
+      if (match == null) {
+        throw FormatException('Invalid RDF ebook ID: $about');
+      }
+      final id = match[1]!;
+      // Sort repeated values so record and element order cannot change output.
+      List<String> texts(String name) => {
+        for (final element in ebook.findElements(
+          name,
+          namespaceUri: _pgNamespace,
+        ))
+          if (element.innerText.trim().isNotEmpty) element.innerText.trim(),
+      }.toList()..sort();
+      final summary = texts('marc520').join('\n\n');
+      final ease = texts('marc908')
+          .map((note) => _readingEase.firstMatch(note)?[1])
+          .nonNulls
+          .map((score) => double.parse(score).round())
+          .firstOrNull;
+      if (summary.isNotEmpty || ease != null) {
+        sink.detail([id, summary.isEmpty ? null : summary, ease]);
+      }
+      for (final agent in ebook.findAllElements(
+        'agent',
+        namespaceUri: _pgNamespace,
+      )) {
+        final name = agent
+            .getElement('name', namespaceUri: _pgNamespace)
+            ?.innerText
+            .trim();
+        if (name == null || name.isEmpty) continue;
+        int? year(String element) => int.tryParse(
+          agent
+                  .getElement(element, namespaceUri: _pgNamespace)
+                  ?.innerText
+                  .trim() ??
+              '',
+        );
+        sink.agent([id, name, year('birthdate'), year('deathdate')]);
+      }
+      final rights = {
+        for (final statement in ebook.findElements(
+          'rights',
+          namespaceUri: _dcNamespace,
+        ))
+          if (statement.innerText.trim().isNotEmpty) statement.innerText.trim(),
+      }.toList()..sort();
+      final rightsLine = rights.isEmpty
+          ? 'Rights not listed in the offline catalog. Check Project Gutenberg.'
+          : rights.join('\n');
+      final files = <String>[];
+      var listed = false;
+      for (final format in ebook.findElements(
+        'hasFormat',
+        namespaceUri: _dcNamespace,
+      )) {
+        final file = format.getElement('file', namespaceUri: _pgNamespace);
+        if (file == null) continue;
+        files.add(
+          file.getAttribute('about', namespaceUri: _rdfNamespace) ?? '',
+        );
+        final epub = file
+            .findElements('format', namespaceUri: _dcNamespace)
+            .any(
+              (format) => format.descendants.whereType<XmlElement>().any(
+                (value) =>
+                    value.name.local == 'value' &&
+                    value.namespaceUri == _rdfNamespace &&
+                    value.innerText.trim() == 'application/epub+zip',
+              ),
+            );
+        if (!epub) continue;
+        final url = Uri.tryParse(
+          file.getAttribute('about', namespaceUri: _rdfNamespace) ?? '',
+        );
+        if (url == null ||
+            url.scheme != 'https' ||
+            url.host != 'www.gutenberg.org' ||
+            url.userInfo.isNotEmpty ||
+            url.hasPort ||
+            url.hasQuery ||
+            url.hasFragment ||
+            url.pathSegments.isEmpty) {
+          throw FormatException('Invalid RDF EPUB URL: $url');
+        }
+        final (variant, label, preference) = switch (url.path) {
+          final path when path == '/ebooks/$id.epub3.images' => (
+            'images',
+            'EPUB3 with images',
+            0,
+          ),
+          final path when path == '/ebooks/$id.epub.images' => (
+            'epub2-images',
+            'EPUB2 with images',
+            1,
+          ),
+          final path when path == '/ebooks/$id.epub.noimages' => (
+            'noimages',
+            'EPUB2 without images',
+            2,
+          ),
+          _ => (url.toString(), 'EPUB · ${url.pathSegments.last}', 3),
+        };
+        final extent = file
+            .getElement('extent', namespaceUri: _dcNamespace)
+            ?.innerText
+            .trim();
+        final size = extent == null ? null : int.tryParse(extent);
+        if (extent != null && (size == null || size <= 0)) {
+          throw FormatException('Invalid RDF EPUB size: $extent');
+        }
+        sink.epub([
+          id,
+          variant,
+          label,
+          preference,
+          url.toString(),
+          size,
+          rightsLine,
+        ]);
+        listed = true;
+      }
+      // A new release lists only its uploaded sources until Gutenberg adds
+      // the formats it generates, while it already serves the EPUBs. List
+      // the two standard variants, sizes unknown, for a record of uploaded
+      // sources that include its main text. TeX and PDF works, and records
+      // with generated formats but no EPUB, stay unlisted.
+      final uploads = '$_base/files/$id/';
+      if (!listed &&
+          files.isNotEmpty &&
+          files.every((url) => url.startsWith(uploads)) &&
+          files.any(
+            (url) =>
+                url == '$uploads$id-0.txt' || url == '$uploads$id-h/$id-h.htm',
+          )) {
+        sink.epub([
+          id,
+          'images',
+          'EPUB3 with images',
+          0,
+          '$_base/ebooks/$id.epub3.images',
+          null,
+          rightsLine,
+        ]);
+        sink.epub([
+          id,
+          'noimages',
+          'EPUB2 without images',
+          2,
+          '$_base/ebooks/$id.epub.noimages',
+          null,
+          rightsLine,
+        ]);
+      }
+    }
+  }
+}
+
+Stream<Uint8List> _readRdfArchive(File input) async* {
+  // Read the tar stream from bzip2 directly: starting a process per member
+  // (tar --to-command) made reading, not parsing, the cost of the import.
+  // Only `.rdf` regular files are yielded; no archive path touches the disk.
+  final process = await Process.start('bzip2', ['-dc', input.absolute.path]);
   final errors = process.stderr
       .transform(const Utf8Decoder(allowMalformed: true))
       .join();
   final done = process.exitCode;
   final reader = ChunkedStreamReader(process.stdout);
+  Future<Uint8List> read(int length) async {
+    final bytes = await reader.readBytes(length);
+    if (bytes.length != length) {
+      throw const FormatException('Truncated RDF archive');
+    }
+    return bytes;
+  }
+
+  Future<void> skip(int length) async {
+    while (length > 0) {
+      final chunk = length < 65536 ? length : 65536;
+      await read(chunk);
+      length -= chunk;
+    }
+  }
+
   try {
+    // A GNU long name or POSIX extended header describes the next member.
+    String? path;
+    int? size;
     while (true) {
-      final header = await reader.readChunk(20);
-      if (header.isEmpty) break;
-      final size = int.tryParse(ascii.decode(header));
-      if (header.length != 20 || size == null || size < 0) {
-        throw const FormatException('Invalid RDF archive member length');
+      final header = await read(512);
+      if (header.every((byte) => byte == 0)) {
+        if ((await read(512)).any((byte) => byte != 0)) {
+          throw const FormatException('Invalid end of RDF archive');
+        }
+        break;
       }
-      yield reader.readStream(size);
+      var sum = 0;
+      for (var i = 0; i < 512; i++) {
+        sum += i >= 148 && i < 156 ? 0x20 : header[i];
+      }
+      final headerSize = _octal(header, 124, 12);
+      if (headerSize == null || _octal(header, 148, 8) != sum) {
+        throw const FormatException('Invalid RDF archive header');
+      }
+      final type = header[156];
+      final length = type == 0x4c || type == 0x78
+          ? headerSize
+          : size ?? headerSize;
+      final padded = (length + 511) ~/ 512 * 512;
+      if (type == 0x4c || type == 0x78) {
+        if (length > _maxRdfMemberBytes) {
+          throw const FormatException('RDF archive header too large');
+        }
+        final body = Uint8List.sublistView(await read(padded), 0, length);
+        if (type == 0x4c) {
+          path = utf8.decode(body).split('\u0000').first;
+        } else {
+          final records = _paxRecords(body);
+          path = records['path'] ?? path;
+          if (records['size'] case final value?) {
+            size = RegExp(r'^[0-9]+$').hasMatch(value)
+                ? int.parse(value)
+                : throw const FormatException('Invalid RDF archive size');
+          }
+        }
+        continue;
+      }
+      String field(int start, int length) => utf8
+          .decode(header.sublist(start, start + length))
+          .split('\u0000')
+          .first;
+      final prefix = ascii.decode(header.sublist(257, 262)) == 'ustar'
+          ? field(345, 155)
+          : '';
+      final name =
+          path ?? (prefix.isEmpty ? field(0, 100) : '$prefix/${field(0, 100)}');
+      path = null;
+      size = null;
+      // Regular and contiguous files; links, directories and others are skipped.
+      if ((type == 0x30 || type == 0 || type == 0x37) &&
+          name.endsWith('.rdf')) {
+        if (length > _maxRdfMemberBytes) {
+          throw FormatException('RDF archive member too large: $name');
+        }
+        yield Uint8List.sublistView(await read(padded), 0, length);
+      } else {
+        await skip(padded);
+      }
+    }
+    // The record padding after the two end blocks is zeros.
+    while (true) {
+      final rest = await reader.readBytes(65536);
+      if (rest.isEmpty) break;
+      if (rest.any((byte) => byte != 0)) {
+        throw const FormatException('Data after the end of the RDF archive');
+      }
     }
     if (await done != 0) {
       throw FormatException(
@@ -365,6 +547,45 @@ Stream<Stream<List<int>>> _readRdfArchive(File input) async* {
     await done;
     await errors;
   }
+}
+
+/// POSIX extended header records: "LENGTH key=value\n", where LENGTH counts
+/// the whole record in bytes, so values may contain newlines.
+Map<String, String> _paxRecords(Uint8List body) {
+  final records = <String, String>{};
+  var start = 0;
+  while (start < body.length) {
+    final space = body.indexOf(0x20, start);
+    final digits = space < 0
+        ? null
+        : ascii.decode(body.sublist(start, space), allowInvalid: true);
+    final length = digits != null && RegExp(r'^[1-9][0-9]*$').hasMatch(digits)
+        ? int.parse(digits)
+        : null;
+    final end = length == null ? -1 : start + length;
+    if (length == null ||
+        end <= space + 1 ||
+        end > body.length ||
+        body[end - 1] != 0x0a) {
+      throw const FormatException('Invalid RDF archive extended header');
+    }
+    final record = utf8.decode(body.sublist(space + 1, end - 1));
+    final equals = record.indexOf('=');
+    if (equals <= 0) {
+      throw const FormatException('Invalid RDF archive extended header');
+    }
+    records[record.substring(0, equals)] = record.substring(equals + 1);
+    start = end;
+  }
+  return records;
+}
+
+int? _octal(Uint8List bytes, int start, int length) {
+  final text = ascii
+      .decode(bytes.sublist(start, start + length), allowInvalid: true)
+      .replaceAll('\u0000', ' ')
+      .trim();
+  return RegExp(r'^[0-7]+$').hasMatch(text) ? int.parse(text, radix: 8) : null;
 }
 
 Stream<List<int>> _readGzip(File input) async* {
