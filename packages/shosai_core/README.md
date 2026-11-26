@@ -35,8 +35,10 @@ publication, so the catalog does not record a publication year.
 The source row carries Gutenberg's donation page as `support_url`; a source
 without one leaves it null, and the app then shows no Support action.
 
-The Nix shell supplies `gzip`, GNU `tar` and `bzip2`. The archive is streamed
-without extracting files to disk; neither the importer nor the app crawls book
+The Nix shell supplies `gzip` and `bzip2`. The importer reads the archive's
+tar stream from `bzip2` without extracting files to disk, parses batches of
+RDF documents on worker isolates and inserts their rows in archive order, so
+the output matches a serial pass. Neither the importer nor the app crawls book
 pages to discover variants. A malformed XML document, invalid EPUB URL or size,
 or damaged compressed input fails without leaving a partial output database.
 
