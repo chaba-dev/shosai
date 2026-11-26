@@ -85,6 +85,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Schedule Gutenberg catalog refresh PRs (#342)
 - *(catalog)* Browse and add free books (#347)
 - *(catalog)* Match the book page mock (#354)
+- *(shell)* Add a text link component (#355)
 
 ### 🐛 Bug Fixes
 
@@ -145,6 +146,11 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Recover downloads with the official EPUB mirror (#349)
 - *(catalog)* Align acquisition actions beneath the cover (#350)
 - *(catalog)* Fill detail pane and name donation actions (#353)
+- *(catalog)* Show subject tags as the mock does (#356)
+- *(catalog)* Show source actions as links (#357)
+- *(catalog)* Show edition sizes in MB and authors by name (#359)
+- *(catalog)* Keep older catalogs searchable and links accessible (#360)
+- *(shell)* Keep link focus visible to assistive technology (#361)
 
 ### 🚜 Refactor
 
@@ -179,6 +185,7 @@ All notable changes to this project will be documented in this file.
 - *(pdf)* Align column assertions with crop guards (#303)
 - *(editions)* Select the intended fixture by identity (#317)
 - *(build)* Normalize inherited cancellation signals (#323)
+- *(catalog)* Render a real book page on request (#358)
 
 ### ⚙️ Miscellaneous Tasks
 
