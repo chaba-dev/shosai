@@ -30,6 +30,9 @@ CatalogClient createCatalogFixture(
     db.execute(
       "INSERT INTO subjects VALUES ('love', 'Love stories'); INSERT INTO categories VALUES ('fiction', 'Fiction'), ('history', 'History')",
     );
+    db.execute(
+      "INSERT INTO author_details VALUES ('austen', 'Jane Austen', 1775, 1817)",
+    );
     for (var i = 0; i < 37; i++) {
       final id = i.toString();
       final title = i == 0
@@ -44,6 +47,20 @@ CatalogClient createCatalogFixture(
       ]);
       db.execute("INSERT INTO book_categories VALUES (?, 'fiction')", [id]);
       db.execute("INSERT INTO book_subjects VALUES (?, 'love')", [id]);
+      if (i == 0) {
+        // Project Gutenberg's published summary for ebook 1342.
+        db.execute('INSERT INTO book_details VALUES (?, ?, ?)', [
+          id,
+          '"Pride and Prejudice" by Jane Austen is a novel published in 1813. '
+              'It follows Elizabeth Bennet, who must learn to see past first '
+              'impressions and hasty judgments. When wealthy Mr. Darcy arrives '
+              "in their countryside neighborhood, his pride and Elizabeth's "
+              'prejudice set the stage for misunderstandings, hidden truths, '
+              'and unexpected revelations about character and love. (This is '
+              'an automatically generated summary.)',
+          69,
+        ]);
+      }
       for (var e = 0; e < editionCount; e++) {
         db.execute(
           'INSERT INTO editions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',

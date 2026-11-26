@@ -60,7 +60,7 @@ void main() {
       expect(await client.isInstalled, isFalse);
       expect(await client.refresh(), CatalogRefresh.installed);
       expect(await client.isInstalled, isTrue);
-      expect(requests.length, 25);
+      expect(requests.length, _files);
       expect(agents.toSet(), {client.userAgent});
       final before = requests.length;
       for (final query in ['猫', '吾輩', '吾輩は']) {
@@ -135,6 +135,22 @@ void main() {
       expect(book.book.sources, ['Project Gutenberg', '青空文庫']);
       expect(book.book.coverUrl, isNull);
       expect(book.subjects, ['Love stories']);
+      expect(book.authors, [
+        (
+          id: 'austen',
+          name: 'Jane Austen',
+          birthYear: 1775,
+          deathYear: 1817,
+          books: 1,
+        ),
+      ]);
+      expect((book.summary, book.readingEase), ('Courtship, at length.', 69));
+      expect(book.moreByAuthor, isEmpty);
+      final cat = (await client.book('cat'))!;
+      expect((cat.summary, cat.readingEase), (null, -13));
+      expect(cat.authors.single.name, '夏目漱石');
+      expect(cat.authors.single.birthYear, isNull);
+
       expect(
         book.editions.map(
           (e) => (e.sourceId, e.sourceName, e.variant, e.rights, e.sizeBytes),
@@ -192,7 +208,7 @@ void main() {
         client.refresh(),
       ]);
       expect(results, everyElement(CatalogRefresh.installed));
-      expect(requests.length, 25);
+      expect(requests.length, _files);
       final restarted = CatalogClient(
         client.directory,
         userAgent: client.userAgent,
@@ -201,7 +217,7 @@ void main() {
       );
       now = now.add(const Duration(hours: 23, minutes: 59));
       expect(await restarted.refresh(), CatalogRefresh.notDue);
-      expect(requests.length, 25);
+      expect(requests.length, _files);
       now = now.add(const Duration(minutes: 1));
       final manifest = _manifest(snapshot)
         ..['builtAt'] = '2027-01-01T00:00:00.000Z';
@@ -210,7 +226,7 @@ void main() {
         '${client.directory}/catalog.sqlite3',
       ).readAsBytesSync();
       expect(await restarted.refresh(), CatalogRefresh.unchanged);
-      expect(requests.length, 26);
+      expect(requests.length, _files + 1);
       expect(
         File('${client.directory}/catalog.sqlite3').readAsBytesSync(),
         bytes,
@@ -295,6 +311,28 @@ void main() {
   );
 
   test(
+    'a catalog from an earlier database version is replaced without waiting a day',
+    () async {
+      await client.refresh();
+      final file = File('${client.directory}/catalog.sqlite3');
+      final db = sqlite3.open(file.path);
+      try {
+        db.execute('PRAGMA user_version = ${catalogDatabaseVersion - 1}');
+      } finally {
+        db.close();
+      }
+      // The previous version recorded its attempt under its own name.
+      File(
+        '${client.directory}/checked-at-v$catalogDatabaseVersion',
+      ).renameSync('${client.directory}/checked-at');
+      now = now.add(const Duration(hours: 1));
+      expect(await client.refresh(), CatalogRefresh.installed);
+      expect((await client.book('pride'))!.readingEase, 69);
+      expect(await client.refresh(), CatalogRefresh.notDue);
+    },
+  );
+
+  test(
     'refresh repairs a corrupt or incompatible public cache using a validated replacement',
     () async {
       await client.refresh();
@@ -347,7 +385,7 @@ void main() {
         now = now.add(const Duration(days: 1));
         final before = requests.length;
         expect(await client.refresh(), CatalogRefresh.installed);
-        expect(requests.length - before, 25);
+        expect(requests.length - before, _files);
         expect((await client.search(query: 'Pride')).single.id, 'pride');
       }
     },
@@ -451,6 +489,14 @@ void main() {
   );
 }
 
+/// Published files plus the manifest.
+final _files =
+    1 +
+    [
+      ...catalogTables.values,
+      ...optionalCatalogTables.values,
+    ].fold(0, (n, table) => n + table.parts.length);
+
 void _fixture(Directory root, Directory snapshot) {
   final db = sqlite3.open('${root.path}/upstream.sqlite3');
   try {
@@ -464,6 +510,9 @@ void _fixture(Directory root, Directory snapshot) {
       INSERT INTO authors VALUES ('austen', 'Austen, Jane', 'Austen', NULL),
         ('soseki', '夏目漱石', '夏目', 'なつめ');
       INSERT INTO book_authors VALUES ('pride', 'austen', 0), ('cat', 'soseki', 0);
+      INSERT INTO author_details VALUES ('austen', 'Jane Austen', 1775, 1817);
+      INSERT INTO book_details VALUES ('pride', 'Courtship, at length.', 69),
+        ('cat', NULL, -13);
       INSERT INTO subjects VALUES ('love', 'Love stories');
       INSERT INTO book_subjects VALUES ('pride', 'love');
       INSERT INTO categories VALUES ('fiction', 'Fiction');

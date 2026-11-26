@@ -413,44 +413,12 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                     itemCount: model.books.length,
                     separatorBuilder: (_, _) =>
                         const SizedBox(width: ShosaiTokens.space5),
-                    itemBuilder: (_, index) {
-                      final book = model.books[index];
-                      return SizedBox(
-                        width: 136,
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(
-                            ShosaiTokens.radiusSm,
-                          ),
-                          onTap: () =>
-                              widget.dispatch(BrowseBookRequested(book.id)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                height: 204,
-                                child: _CatalogCover(book: book),
-                              ),
-                              const SizedBox(height: ShosaiTokens.space2),
-                              Text(
-                                book.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: shellEditorialStyle(14, 19),
-                              ),
-                              Text(
-                                book.authors.join(', '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: shellInterfaceStyle(
-                                  12,
-                                  16,
-                                ).copyWith(color: palette.inkMuted),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
+                    itemBuilder: (_, index) => _CatalogShelfCard(
+                      book: model.books[index],
+                      onPressed: () => widget.dispatch(
+                        BrowseBookRequested(model.books[index].id),
+                      ),
+                    ),
                   ),
                 )
               else
@@ -760,6 +728,44 @@ String _filterLabel(AppLocalizations l10n, BrowseFilter filter) =>
       BrowseFilter.authors => l10n.catalogAuthors,
     };
 
+/// A 136 px cover with its title and author, on result and author shelves.
+class _CatalogShelfCard extends StatelessWidget {
+  const _CatalogShelfCard({required this.book, required this.onPressed});
+  final CatalogBook book;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 136,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(ShosaiTokens.radiusSm),
+      onTap: onPressed,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 204, child: _CatalogCover(book: book)),
+          const SizedBox(height: ShosaiTokens.space2),
+          Text(
+            book.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: shellEditorialStyle(14, 19),
+          ),
+          Text(
+            book.authors.join(', '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: shellInterfaceStyle(
+              12,
+              16,
+            ).copyWith(color: ShellPalette.of(context).inkMuted),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 class _CatalogCover extends StatelessWidget {
   const _CatalogCover({required this.book});
   final CatalogBook book;
@@ -919,35 +925,107 @@ class _CatalogBookPage extends StatelessWidget {
             ),
           ),
         );
-    final metadata = details == null
+    void browseAuthor(CatalogBookAuthor author) => dispatch(
+      BrowseChanged((
+        query: '',
+        filter: BrowseFilter.freeBooks,
+        category: null,
+        language: null,
+        source: null,
+        author: (id: author.id, name: author.name, books: author.books),
+      )),
+    );
+    String year(int value) =>
+        value < 0 ? l10n.catalogYearBce(-value) : '$value';
+    final muted = shellInterfaceStyle(16, 24).copyWith(color: palette.inkMuted);
+    final header = details == null
         ? const SizedBox.shrink()
         : Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (details.book.sources.isNotEmpty) ...[
+                _CatalogEyebrow(details.book.sources.join(' · ')),
+                const SizedBox(height: ShosaiTokens.space2),
+              ],
               Text(details.book.title, style: shellScreenTitleStyle(layout)),
-              const SizedBox(height: ShosaiTokens.space2),
-              Text(
-                details.book.authors.join(', '),
-                style: shellEditorialStyle(
-                  20,
-                  28,
-                ).copyWith(color: palette.inkMuted),
-              ),
-              const SizedBox(height: ShosaiTokens.space4),
+              const SizedBox(height: ShosaiTokens.space1),
               Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: ShosaiTokens.space2,
-                runSpacing: ShosaiTokens.space2,
                 children: [
-                  for (final subject in details.subjects)
-                    Chip(label: Text(subject)),
+                  for (final (index, author) in details.authors.indexed) ...[
+                    ConstrainedBox(
+                      constraints: sourceButtonConstraints,
+                      child: ShadButton.ghost(
+                        height: 0,
+                        padding: EdgeInsets.zero,
+                        foregroundColor: palette.accent,
+                        hoverForegroundColor: palette.accent,
+                        onPressed: () => browseAuthor(author),
+                        child: Text(
+                          author.name,
+                          style: shellInterfaceStyle(
+                            16,
+                            24,
+                            weight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if ([
+                          if (author.birthYear != null ||
+                              author.deathYear != null)
+                            '${author.birthYear == null ? '' : year(author.birthYear!)}'
+                                '–${author.deathYear == null ? '' : year(author.deathYear!)}',
+                          if (index == details.authors.length - 1) ...[
+                            if (details.editions.isNotEmpty)
+                              details.editions[model.edition].language
+                                  .split(';')
+                                  .map(
+                                    (code) =>
+                                        l10n.catalogLanguageName(code.trim()),
+                                  )
+                                  .join(', '),
+                            if (details.readingEase case final ease?)
+                              l10n.catalogReadingEase(ease),
+                          ],
+                        ]
+                        case final facts when facts.isNotEmpty)
+                      Text(facts.join(' · '), style: muted),
+                  ],
                 ],
               ),
+            ],
+          );
+    final body = details == null
+        ? const SizedBox.shrink()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (details.summary case final summary?) ...[
+                const SizedBox(height: ShosaiTokens.space4),
+                Text(
+                  summary,
+                  style: shellEditorialStyle(18, 28, weight: FontWeight.w400),
+                ),
+              ],
+              if (details.subjects.isNotEmpty) ...[
+                const SizedBox(height: ShosaiTokens.space4),
+                Wrap(
+                  spacing: ShosaiTokens.space2,
+                  runSpacing: ShosaiTokens.space2,
+                  children: [
+                    for (final subject in details.subjects)
+                      Chip(label: Text(subject)),
+                  ],
+                ),
+              ],
               const SizedBox(height: ShosaiTokens.space5),
               Text(
-                l10n.catalogChooseEdition,
-                style: shellEditorialStyle(22, 28),
+                l10n.catalogEdition,
+                style: shellInterfaceStyle(14, 20, weight: FontWeight.w600),
               ),
-              const SizedBox(height: ShosaiTokens.space3),
+              const SizedBox(height: ShosaiTokens.space2),
               if (details.editions.isNotEmpty) ...[
                 Align(
                   alignment: AlignmentDirectional.centerStart,
@@ -1147,14 +1225,17 @@ class _CatalogBookPage extends StatelessWidget {
               if (model.detailFailed) _CatalogError(l10n.catalogReadFailed),
               if (details != null)
                 if (phone) ...[
-                  Center(
-                    child: SizedBox(
-                      width: 152,
-                      child: _CatalogCover(book: details.book),
-                    ),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 112,
+                        child: _CatalogCover(book: details.book),
+                      ),
+                      const SizedBox(width: ShosaiTokens.space4),
+                      Expanded(child: header),
+                    ],
                   ),
-                  const SizedBox(height: ShosaiTokens.space5),
-                  metadata,
+                  body,
                 ] else
                   LayoutBuilder(
                     builder: (context, constraints) {
@@ -1181,7 +1262,8 @@ class _CatalogBookPage extends StatelessWidget {
                           children: [
                             Center(child: cover),
                             const SizedBox(height: ShosaiTokens.space5),
-                            metadata,
+                            header,
+                            body,
                           ],
                         );
                       }
@@ -1190,14 +1272,122 @@ class _CatalogBookPage extends StatelessWidget {
                         children: [
                           cover,
                           const SizedBox(width: ShosaiTokens.space6),
-                          Expanded(child: metadata),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [header, body],
+                            ),
+                          ),
                         ],
                       );
                     },
                   ),
+              if (details != null && details.moreByAuthor.isNotEmpty) ...[
+                const SizedBox(height: ShosaiTokens.space7),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // The rule runs behind the heading, so a long or enlarged
+                    // heading wraps across the full width instead of sharing it.
+                    final heading = Stack(
+                      alignment: AlignmentDirectional.centerStart,
+                      children: [
+                        Positioned.fill(
+                          child: Center(
+                            child: Divider(height: 1, color: palette.line),
+                          ),
+                        ),
+                        ColoredBox(
+                          color: palette.canvas,
+                          child: Padding(
+                            padding: const EdgeInsetsDirectional.only(
+                              end: ShosaiTokens.space4,
+                            ),
+                            child: Semantics(
+                              header: true,
+                              child: Text(
+                                l10n.catalogMoreByAuthor(
+                                  details.authors.first.name,
+                                ),
+                                style: shellEditorialStyle(24, 30),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                    final all = ConstrainedBox(
+                      constraints: sourceButtonConstraints,
+                      child: ShadButton.ghost(
+                        height: 0,
+                        trailing: const Icon(
+                          LucideIcons.chevronRight,
+                          size: 18,
+                        ),
+                        onPressed: () => browseAuthor(details.authors.first),
+                        child: Text(
+                          l10n.catalogAllByAuthor(details.authors.first.books),
+                        ),
+                      ),
+                    );
+                    if (constraints.maxWidth < 560) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [heading, all],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(child: heading),
+                        const SizedBox(width: ShosaiTokens.space2),
+                        all,
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: ShosaiTokens.space3),
+                SizedBox(
+                  height: 302 * MediaQuery.textScalerOf(context).scale(1),
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: details.moreByAuthor.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(width: ShosaiTokens.space5),
+                    itemBuilder: (_, index) => _CatalogShelfCard(
+                      book: details.moreByAuthor[index],
+                      onPressed: () => dispatch(
+                        BrowseBookRequested(details.moreByAuthor[index].id),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The sources above a book title, in the sidebar's small-caps label style.
+class _CatalogEyebrow extends StatelessWidget {
+  const _CatalogEyebrow(this.label);
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final japanese =
+        shosaiInterfaceFontForText(label) == shosaiJapaneseInterfaceFontFamily;
+    final style = shellInterfaceStyle(
+      japanese ? 12 : 11,
+      japanese ? 16 : 14,
+      weight: FontWeight.w600,
+    ).copyWith(color: ShellPalette.of(context).inkMuted);
+    return Text(
+      japanese ? label : label.toUpperCase(),
+      style: shosaiInterfaceStyleForText(
+        japanese ? style : style.copyWith(letterSpacing: .88),
+        label,
       ),
     );
   }

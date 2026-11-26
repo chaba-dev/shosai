@@ -17,7 +17,9 @@ export 'catalog_database.dart'
         CatalogCategory,
         CatalogEdition,
         CatalogBookDetails,
+        CatalogBookAuthor,
         CatalogAuthor,
+        catalogMoreByAuthorLimit,
         CatalogFilters;
 
 enum CatalogRefresh { notDue, unchanged, installed }
@@ -111,7 +113,10 @@ final class CatalogClient {
         await entry.delete(recursive: true);
       }
     }
-    final attempt = File('$directory/checked-at');
+    // Each catalog database version throttles separately, so a catalog an
+    // earlier app version installed, which this one cannot read, is replaced
+    // at once rather than leaving Search unusable until the next daily attempt.
+    final attempt = File('$directory/checked-at-v$catalogDatabaseVersion');
     final now = _clock().toUtc();
     if (await attempt.exists()) {
       final previous = DateTime.parse(await attempt.readAsString());
@@ -119,7 +124,7 @@ final class CatalogClient {
         return CatalogRefresh.notDue;
       }
     }
-    final pending = File('$directory/checked-at.new');
+    final pending = File('${attempt.path}.new');
     await pending.writeAsString(now.toIso8601String(), flush: true);
     await pending.rename(attempt.path);
     final stage = await Directory(directory).createTemp('.staging-');

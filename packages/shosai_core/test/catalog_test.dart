@@ -49,8 +49,9 @@ void main() {
     final catalog = sqlite3.openInMemory();
     addTearDown(catalog.close);
     catalog.execute(catalogSchema);
-    for (final table in catalogTables.keys) {
-      for (final part in catalogTables[table]!.parts.split('')) {
+    final tables = {...catalogTables, ...optionalCatalogTables};
+    for (final table in tables.keys) {
+      for (final part in tables[table]!.parts.split('')) {
         final path = '$table/$part.json';
         final bytes = File('${output.path}/$path').readAsBytesSync();
         expect(manifest.files[path], (
@@ -68,7 +69,18 @@ void main() {
         }
       }
     }
-    expect(catalog.userVersion, 1);
+    expect(catalog.userVersion, catalogDatabaseVersion);
+    expect(
+      catalog
+          .select('''
+        SELECT d.display_name, d.birth_year, d.death_year, b.summary, b.reading_ease
+        FROM author_details d, book_details b
+      ''')
+          .map((row) => row.values.toList()),
+      [
+        ['Jane Austen', 1775, 1817, 'Courtship, at length.', 69],
+      ],
+    );
     expect(catalog.select('PRAGMA foreign_key_check'), isEmpty);
     final counts = catalog.select('''
       SELECT source_id, COUNT(*) AS edition_count FROM editions GROUP BY source_id
@@ -283,7 +295,26 @@ void main() {
       ),
       _manifest(files: {..._files, '../cover.jpg': _file}),
       _manifest(files: {..._files, 'https://example.com': _file}),
+      // A descriptive table is listed completely or not at all.
+      _manifest(files: {..._files, 'book_details/0.json': _file}),
     ];
+    // Snapshots published before the descriptive tables remain valid.
+    expect(CatalogManifest.parse(jsonEncode(_manifest())).files, hasLength(24));
+    expect(
+      CatalogManifest.parse(
+        jsonEncode(
+          _manifest(
+            files: {
+              ..._files,
+              for (final entry in optionalCatalogTables.entries)
+                for (final part in entry.value.parts.split(''))
+                  '${entry.key}/$part.json': _file,
+            },
+          ),
+        ),
+      ).files,
+      hasLength(41),
+    );
     for (final input in invalid) {
       expect(
         () => CatalogManifest.parse(jsonEncode(input)),

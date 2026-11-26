@@ -124,7 +124,11 @@ class BrowseController extends ChangeNotifier {
       case BrowseSearchSubmitted():
         _rememberSearch();
       case BrowseChanged(:final criteria):
-        if (criteria == _model.criteria) return;
+        if (criteria == _model.criteria) {
+          // The same author from their own book's details: show their books.
+          if (_model.details != null) dispatch(const BrowseBackRequested());
+          return;
+        }
         _cancelAdd();
         final queryChanged = criteria.query != _model.criteria.query;
         _detailRevision++;

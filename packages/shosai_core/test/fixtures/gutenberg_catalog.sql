@@ -4,6 +4,8 @@ INSERT INTO books VALUES ('gutenberg:1342', 'Pride and Prejudice');
 INSERT INTO authors (id, name, sort_name)
 VALUES ('gutenberg:68', 'Jane Austen', 'Austen, Jane');
 INSERT INTO book_authors VALUES ('gutenberg:1342', 'gutenberg:68', 0);
+INSERT INTO author_details VALUES ('gutenberg:68', 'Jane Austen', 1775, 1817);
+INSERT INTO book_details VALUES ('gutenberg:1342', 'Courtship, at length.', 69);
 INSERT INTO subjects VALUES ('lcsh:courtship', 'Courtship -- Fiction');
 INSERT INTO book_subjects VALUES ('gutenberg:1342', 'lcsh:courtship');
 INSERT INTO categories VALUES ('classics', 'Classics');

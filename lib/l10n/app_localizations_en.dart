@@ -1573,6 +1573,59 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get catalogEdition => 'Edition';
+
+  @override
+  String catalogLanguageName(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'en': 'English',
+      'fr': 'French',
+      'de': 'German',
+      'fi': 'Finnish',
+      'nl': 'Dutch',
+      'it': 'Italian',
+      'es': 'Spanish',
+      'pt': 'Portuguese',
+      'la': 'Latin',
+      'el': 'Greek',
+      'sv': 'Swedish',
+      'da': 'Danish',
+      'eo': 'Esperanto',
+      'hu': 'Hungarian',
+      'ru': 'Russian',
+      'pl': 'Polish',
+      'zh': 'Chinese',
+      'ja': 'Japanese',
+      'other': '$code',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String catalogReadingEase(int score) {
+    return 'Reading ease $score';
+  }
+
+  @override
+  String catalogYearBce(int year) {
+    return '$year BCE';
+  }
+
+  @override
+  String catalogMoreByAuthor(String author) {
+    return 'More by $author';
+  }
+
+  @override
+  String catalogAllByAuthor(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return 'All $countString';
+  }
+
+  @override
   String get catalogViewSource => 'View at source';
 
   @override

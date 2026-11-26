@@ -2616,6 +2616,42 @@ abstract class AppLocalizations {
   /// **'{count} bytes'**
   String catalogBytes(int count);
 
+  /// No description provided for @catalogEdition.
+  ///
+  /// In en, this message translates to:
+  /// **'Edition'**
+  String get catalogEdition;
+
+  /// No description provided for @catalogLanguageName.
+  ///
+  /// In en, this message translates to:
+  /// **'{code, select, en{English} fr{French} de{German} fi{Finnish} nl{Dutch} it{Italian} es{Spanish} pt{Portuguese} la{Latin} el{Greek} sv{Swedish} da{Danish} eo{Esperanto} hu{Hungarian} ru{Russian} pl{Polish} zh{Chinese} ja{Japanese} other{{code}}}'**
+  String catalogLanguageName(String code);
+
+  /// No description provided for @catalogReadingEase.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading ease {score}'**
+  String catalogReadingEase(int score);
+
+  /// No description provided for @catalogYearBce.
+  ///
+  /// In en, this message translates to:
+  /// **'{year} BCE'**
+  String catalogYearBce(int year);
+
+  /// No description provided for @catalogMoreByAuthor.
+  ///
+  /// In en, this message translates to:
+  /// **'More by {author}'**
+  String catalogMoreByAuthor(String author);
+
+  /// No description provided for @catalogAllByAuthor.
+  ///
+  /// In en, this message translates to:
+  /// **'All {count}'**
+  String catalogAllByAuthor(int count);
+
   /// No description provided for @catalogViewSource.
   ///
   /// In en, this message translates to:
