@@ -86,6 +86,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Browse and add free books (#347)
 - *(catalog)* Match the book page mock (#354)
 - *(shell)* Add a text link component (#355)
+- *(catalog)* Publish Gutenberg summaries, reading ease and author dates (#352)
 
 ### 🐛 Bug Fixes
 
