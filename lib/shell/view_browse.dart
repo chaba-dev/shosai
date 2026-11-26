@@ -935,6 +935,17 @@ class _CatalogBookPage extends StatelessWidget {
     String year(int value) =>
         value < 0 ? l10n.catalogYearBce(-value) : '$value';
     final muted = shellInterfaceStyle(16, 24).copyWith(color: palette.inkMuted);
+    final bookFacts = details == null
+        ? const <String>[]
+        : [
+            if (details.editions.isNotEmpty)
+              details.editions[model.edition].language
+                  .split(';')
+                  .map((code) => l10n.catalogLanguageName(code.trim()))
+                  .join(', '),
+            if (details.readingEase case final ease?)
+              l10n.catalogReadingEase(ease),
+          ];
     final header = details == null
         ? const SizedBox.shrink()
         : Column(
@@ -965,22 +976,14 @@ class _CatalogBookPage extends StatelessWidget {
                               author.deathYear != null)
                             '${author.birthYear == null ? '' : year(author.birthYear!)}'
                                 '–${author.deathYear == null ? '' : year(author.deathYear!)}',
-                          if (index == details.authors.length - 1) ...[
-                            if (details.editions.isNotEmpty)
-                              details.editions[model.edition].language
-                                  .split(';')
-                                  .map(
-                                    (code) =>
-                                        l10n.catalogLanguageName(code.trim()),
-                                  )
-                                  .join(', '),
-                            if (details.readingEase case final ease?)
-                              l10n.catalogReadingEase(ease),
-                          ],
+                          if (index == details.authors.length - 1) ...bookFacts,
                         ]
                         case final facts when facts.isNotEmpty)
                       Text(facts.join(' · '), style: muted),
                   ],
+                  // Book facts do not depend on an author being catalogued.
+                  if (details.authors.isEmpty && bookFacts.isNotEmpty)
+                    Text(bookFacts.join(' · '), style: muted),
                 ],
               ),
             ],

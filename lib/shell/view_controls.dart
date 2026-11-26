@@ -54,26 +54,36 @@ class ShellLink extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = ShellPalette.of(context).accent;
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        minHeight: math.max(
-          ShosaiTokens.sizeTouchTarget,
-          shosaiShadButtonHeight(context),
+    // One link node for assistive technology instead of Shad's button; the
+    // button below still owns focus and keyboard activation.
+    return Semantics(
+      container: true,
+      link: true,
+      label: label,
+      onTap: onPressed,
+      excludeSemantics: true,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: ShosaiTokens.sizeTouchTarget,
+          minHeight: math.max(
+            ShosaiTokens.sizeTouchTarget,
+            shosaiShadButtonHeight(context),
+          ),
         ),
-      ),
-      child: ShadButton.link(
-        height: 0,
-        padding: EdgeInsets.zero,
-        foregroundColor: accent,
-        hoverForegroundColor: accent,
-        pressedForegroundColor: accent,
-        hoverTextDecoration: TextDecoration.underline,
-        onPressed: onPressed,
-        trailing: trailing == null
-            ? null
-            : Icon(trailing, size: 18, color: accent),
-        child: Flexible(
-          child: Text(label, style: style ?? shellInterfaceStyle(16, 24)),
+        child: ShadButton.link(
+          height: 0,
+          padding: EdgeInsets.zero,
+          foregroundColor: accent,
+          hoverForegroundColor: accent,
+          pressedForegroundColor: accent,
+          hoverTextDecoration: TextDecoration.underline,
+          onPressed: onPressed,
+          trailing: trailing == null
+              ? null
+              : Icon(trailing, size: 18, color: accent),
+          child: Flexible(
+            child: Text(label, style: style ?? shellInterfaceStyle(16, 24)),
+          ),
         ),
       ),
     );
