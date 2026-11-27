@@ -785,11 +785,11 @@ Future<({int works, int editions, int skipped})> _importRows(
           .select([id])
           .firstOrNull;
       if (details != null) {
-        write('INSERT INTO book_details VALUES (?, ?, ?)', [
-          work,
-          details['summary'],
-          details['reading_ease'],
-        ]);
+        write(
+          'INSERT INTO book_details (book_id, summary, reading_ease) '
+          'VALUES (?, ?, ?)',
+          [work, details['summary'], details['reading_ease']],
+        );
       }
       final subjects = _values(field('Subjects'));
       for (final subject in subjects) {

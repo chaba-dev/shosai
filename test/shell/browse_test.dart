@@ -1925,6 +1925,7 @@ void main() {
         importCatalog(
           stage.path,
           File('${stage.path}/manifest.json').readAsStringSync(),
+          Uri.parse('http://127.0.0.1:1/'),
         );
         File(
           '${stage.path}/catalog.sqlite3',

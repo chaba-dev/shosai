@@ -97,7 +97,10 @@ bool catalogMatches(String path, CatalogManifest candidate) {
   }
 }
 
-void importCatalog(String stage, String manifestText) {
+/// Loads a verified snapshot that [stage] holds. Relative edition cover URLs
+/// name inventoried thumbnails and are resolved against [root], the snapshot
+/// URL the files came from.
+void importCatalog(String stage, String manifestText, Uri root) {
   final manifest = CatalogManifest.parse(manifestText);
   // Verify even inventory entries that this version does not interpret.
   for (final entry in manifest.files.entries) {
@@ -121,6 +124,7 @@ void importCatalog(String stage, String manifestText) {
       final table = entry.key;
       final fields = db.select('PRAGMA table_info($table)');
       final columns = fields.map((row) => row['name'] as String).toList();
+      final cover = table == 'editions' ? columns.indexOf('cover_url') : -1;
       final stmt = db.prepare(
         'INSERT INTO $table VALUES (${List.filled(columns.length, '?').join(',')})',
       );
@@ -133,9 +137,9 @@ void importCatalog(String stage, String manifestText) {
             throw const FormatException('Expected catalog rows');
           }
           for (final row in rows) {
-            if (row is! Map ||
-                row.length != columns.length ||
-                !columns.every(row.containsKey)) {
+            // Newer snapshots may add columns; unknown ones are ignored and
+            // absent ones are null, which NOT NULL columns then reject.
+            if (row is! Map) {
               throw const FormatException('Invalid catalog columns');
             }
             for (final field in fields) {
@@ -148,7 +152,15 @@ void importCatalog(String stage, String manifestText) {
                 throw const FormatException('Invalid catalog column type');
               }
             }
-            stmt.execute([for (final column in columns) row[column]]);
+            final values = [for (final column in columns) row[column]];
+            if (cover >= 0) {
+              values[cover] = _coverUrl(
+                values[cover] as String?,
+                manifest,
+                root,
+              );
+            }
+            stmt.execute(values);
           }
         }
       } finally {
@@ -213,6 +225,20 @@ void importCatalog(String stage, String manifestText) {
   } finally {
     db.close();
   }
+}
+
+/// An absolute HTTP(S) cover stays as published; any other must name an
+/// inventoried thumbnail, which is resolved against the snapshot.
+String? _coverUrl(String? url, CatalogManifest manifest, Uri root) {
+  if (url == null) return null;
+  final uri = Uri.tryParse(url);
+  if (uri != null &&
+      (uri.scheme == 'https' || uri.scheme == 'http') &&
+      uri.host.isNotEmpty) {
+    return url;
+  }
+  if (manifest.thumbnails.containsKey(url)) return root.resolve(url).toString();
+  throw FormatException('Catalog cover is not inventoried: $url');
 }
 
 T _read<T>(String path, T Function(Database) body) {

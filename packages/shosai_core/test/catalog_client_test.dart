@@ -60,8 +60,13 @@ void main() {
       expect(await client.isInstalled, isFalse);
       expect(await client.refresh(), CatalogRefresh.installed);
       expect(await client.isInstalled, isTrue);
+      // Thumbnails load when shown, not with the catalog.
       expect(requests.length, _files);
       expect(agents.toSet(), {client.userAgent});
+      expect(
+        (await client.book('cat'))!.book.coverUrl,
+        'http://127.0.0.1:${server.port}/$_cover',
+      );
       final before = requests.length;
       for (final query in ['猫', '吾輩', '吾輩は']) {
         expect((await client.search(query: query)).map((b) => b.id), ['cat']);
@@ -202,6 +207,74 @@ void main() {
       final bounded = await client.categoryPreviews(categoryIds: ['fiction']);
       expect(bounded.keys, ['fiction']);
       expect(bounded['fiction']!.map((book) => book.id), ['cat', 'pride']);
+    },
+  );
+
+  test(
+    'installs snapshots with added columns; missing required data fails',
+    () async {
+      void rewrite(String path, void Function(Map<String, dynamic>) edit) {
+        final file = File('${snapshot.path}/$path');
+        final rows = (jsonDecode(file.readAsStringSync()) as List)
+            .cast<Map<String, dynamic>>();
+        rows.forEach(edit);
+        file.writeAsStringSync(jsonEncode(rows));
+        _reinventory(snapshot, path);
+      }
+
+      for (final part in catalogTables['editions']!.parts.split('')) {
+        rewrite('editions/$part.json', (row) {
+          row['future_column'] = 'ignored';
+          row.remove('size_bytes');
+        });
+      }
+      // A details row may carry nothing this build knows.
+      for (final part in optionalCatalogTables['book_details']!.parts.split(
+        '',
+      )) {
+        rewrite('book_details/$part.json', (row) {
+          if (row['book_id'] == 'cat') {
+            row
+              ..clear()
+              ..addAll({'book_id': 'cat', 'future_detail': 'x'});
+          }
+        });
+      }
+      expect(await client.refresh(), CatalogRefresh.installed);
+      final pride = (await client.book('pride'))!;
+      expect(pride.editions.map((e) => e.sizeBytes), [null, null]);
+      expect(pride.editions.first.variant, 'With images');
+
+      final books = File('${snapshot.path}/books/0.json');
+      final original = books.readAsBytesSync();
+      rewrite('books/0.json', (row) => row.remove('title'));
+      now = now.add(const Duration(days: 1));
+      await expectLater(client.refresh(), throwsFormatException);
+      books.writeAsBytesSync(original);
+      _reinventory(snapshot, 'books/0.json');
+      for (final part in catalogTables['editions']!.parts.split('')) {
+        rewrite('editions/$part.json', (row) => row['another_column'] = 1);
+      }
+      _writeManifest(snapshot, _manifest(snapshot)..remove('thumbnails'));
+      now = now.add(const Duration(days: 1));
+      // A relative cover must name an inventoried thumbnail, even one whose
+      // name starts like a URL.
+      await expectLater(client.refresh(), throwsFormatException);
+      for (final part in catalogTables['editions']!.parts.split('')) {
+        rewrite('editions/$part.json', (row) {
+          if (row['cover_url'] != null) row['cover_url'] = 'http-cover.jpg';
+        });
+      }
+      _writeManifest(
+        snapshot,
+        _manifest(snapshot)
+          ..['thumbnails'] = {
+            'thumbnails/${'d' * 40}.jpg': {'sizeBytes': 1, 'sha256': 'e' * 64},
+          },
+      );
+      now = now.add(const Duration(days: 1));
+      await expectLater(client.refresh(), throwsFormatException);
+      expect((await client.book('pride'))!.editions.first.sizeBytes, isNull);
     },
   );
 
@@ -540,7 +613,7 @@ void _fixture(Directory root, Directory snapshot) {
         ('soseki', '夏目漱石', '夏目', 'なつめ');
       INSERT INTO book_authors VALUES ('pride', 'austen', 0), ('cat', 'soseki', 0);
       INSERT INTO author_details VALUES ('austen', 'Jane Austen', 1775, 1817);
-      INSERT INTO book_details VALUES ('pride', 'Courtship, at length.', 69),
+      INSERT INTO book_details (book_id, summary, reading_ease) VALUES ('pride', 'Courtship, at length.', 69),
         ('cat', NULL, -13);
       INSERT INTO subjects VALUES ('love', 'Love stories');
       INSERT INTO book_subjects VALUES ('pride', 'love');
@@ -555,7 +628,7 @@ void _fixture(Directory root, Directory snapshot) {
          'https://www.aozora.gr.jp/translation.html', 'xhtml', NULL, NULL),
         ('aozora', 'cat', 'cat', '吾輩は猫である', '新字新仮名', 0, 'ja',
          'https://www.aozora.gr.jp/cat', 'Public domain in Japan',
-         'https://www.aozora.gr.jp/cat.html', 'xhtml', NULL, NULL),
+         'https://www.aozora.gr.jp/cat.html', 'xhtml', NULL, '$_cover'),
         ('gutenberg', 'symbols', 'symbols', 'Symbols', 'With images', 0, 'de',
          'https://www.gutenberg.org/ebooks/1', 'Public domain in the USA',
          'https://www.gutenberg.org/ebooks/1.epub3.images', 'epub', NULL, NULL);''',
@@ -563,8 +636,16 @@ void _fixture(Directory root, Directory snapshot) {
   } finally {
     db.close();
   }
-  exportCatalogJson('${root.path}/upstream.sqlite3', snapshot.path);
+  final thumbnails = Directory('${root.path}/thumbnails')..createSync();
+  File('${thumbnails.path}/${_cover.substring(11)}').writeAsBytesSync([1, 2]);
+  exportCatalogJson(
+    '${root.path}/upstream.sqlite3',
+    snapshot.path,
+    thumbnails: thumbnails.path,
+  );
 }
+
+final _cover = 'thumbnails/${'c' * 40}.jpg';
 
 Map<String, dynamic> _manifest(Directory snapshot) =>
     jsonDecode(File('${snapshot.path}/manifest.json').readAsStringSync())

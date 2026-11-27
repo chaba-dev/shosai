@@ -51,14 +51,47 @@ the output matches a serial pass. Neither the importer nor the app crawls book
 pages to discover variants. A malformed XML document, invalid EPUB URL or size,
 or damaged compressed input fails without leaving a partial output database.
 
-Pass `--previous CHECKED_IN_DIRECTORY` after the two paths when regenerating.
+Standard Ebooks comes next, into the same database:
+`GITHUB_TOKEN=… dart run tool/import_standard_ebooks.dart NEW.sqlite
+NEW_WORK_DIRECTORY [--previous CHECKED_IN_DIRECTORY]`. It lists the
+`standardebooks` GitHub organization's repositories (one GraphQL query per 25),
+reads each book's `src/epub/content.opf` at the listed commit from
+`raw.githubusercontent.com`, and checks every file against its Git blob ID. It
+never requests standardebooks.org pages or their OPDS feeds. Every run reads
+every book; the catalog keeps no state between runs. A book whose OPF names
+exactly one Gutenberg ebook in `dc:source` that the catalog lists, and that no
+other Standard Ebooks book names, joins that work as its first edition, keeping Gutenberg's authors; its title, summary,
+reading ease, long description, word count and release date replace
+Gutenberg's. Other books are works of their own, including every book citing a Gutenberg
+ebook that another Standard Ebooks book also cites, even among several
+sources: that ebook may be a collection, as Gutenberg 31 (three Sophocles
+plays) is. The download URL is
+the OPF identifier plus `/downloads/`, the identifier's path with `/` replaced
+by `_`, and `.epub?source=download`; repository names are sometimes truncated,
+so they are not used. Genres map to existing Browse categories, `series`
+collections go into `book_series`, and LCSH subjects into `subjects`. A
+malformed OPF fails the whole import.
+
+Covers become 300×450 JPEG thumbnails named by the blob ID of the book's
+`images/cover.jpg`, written to `NEW_WORK_DIRECTORY/thumbnails`. Thumbnails
+already in the previous snapshot are copied rather than downloaded again; the
+encoder is deterministic, so a regenerated thumbnail has the same bytes.
+
+Pass `--previous CHECKED_IN_DIRECTORY` after the two paths when regenerating,
+and `--thumbnails NEW_WORK_DIRECTORY/thumbnails` when editions name relative
+`thumbnails/…` covers.
 The exporter compares counts, file paths, sizes and hashes, preserving the
 previous build timestamp if nothing changed. An unchanged refresh therefore
 produces byte-identical files, including the manifest. It never edits the
 previous snapshot; CI can review the staged output before replacing it.
 
 The snapshot has `manifest.json` plus 24 fixed `<table>/<part>.json` files
-for `catalogTables`, and 17 more for `optionalCatalogTables`. A manifest lists
+for `catalogTables`, and 18 more for `optionalCatalogTables`. Thumbnails sit
+under `thumbnails/` with their own `thumbnails` inventory in the manifest; apps
+verify and download `files` on each update but load a thumbnail only when
+showing it, resolving the edition's relative `cover_url` against the snapshot.
+Tables may gain nullable columns without a format change: apps load the
+columns they know and ignore the rest. A manifest lists
 every partition of a descriptive table or none of it, so snapshots published
 before these tables still load, and earlier app versions verify the extra files
 but ignore them. Each UTF-8 JSON array has one row per line, with rows ordered
@@ -69,8 +102,8 @@ exceeds 24 MiB rather than changing file boundaries to meet Pages' 25 MiB limit.
 
 The manifest counts editions by source and records each file's size and SHA-256
 over its JSON bytes before HTTP compression. Its format version is independent
-of the SQLite schema version. This Gutenberg exporter preserves metadata as
-imported; it does not fetch thumbnails or probe downloads. An RDF listing records
+of the SQLite schema version. The exporter preserves metadata as
+imported; it fetches nothing and does not probe downloads. An RDF listing records
 what Gutenberg offered at the feed date, not a guarantee of current availability
 or permission in every jurisdiction.
 

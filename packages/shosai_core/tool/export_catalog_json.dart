@@ -9,12 +9,19 @@ import 'package:sqlite3/sqlite3.dart';
 // Leave some headroom under Pages' 25 MiB per-file limit. Fail instead of
 // shifting partition boundaries and producing unrelated Git diffs.
 const _maxPartitionBytes = 24 * 1024 * 1024;
+final _thumbnailPath = RegExp(r'^thumbnails/[0-9a-f]{40}\.jpg$');
 
 void main(List<String> args) {
-  if (args.length != 2 && !(args.length == 4 && args[2] == '--previous')) {
+  final options = <String, String>{};
+  for (var i = 2; i + 1 < args.length; i += 2) {
+    if (!{'--previous', '--thumbnails'}.contains(args[i])) break;
+    options[args[i]] = args[i + 1];
+  }
+  if (args.length < 2 || args.length != 2 + 2 * options.length) {
     stderr.writeln(
       'Usage: dart run tool/export_catalog_json.dart '
-      '<catalog.sqlite> <new-output-directory> [--previous <checked-in-directory>]',
+      '<catalog.sqlite> <new-output-directory> [--previous <checked-in-directory>] '
+      '[--thumbnails <thumbnail-directory>]',
     );
     exitCode = 64;
     return;
@@ -23,7 +30,8 @@ void main(List<String> args) {
     exportCatalogJson(
       args[0],
       args[1],
-      previous: args.length == 4 ? args[3] : null,
+      previous: options['--previous'],
+      thumbnails: options['--thumbnails'],
     );
   } on Exception catch (error) {
     stderr.writeln('Catalog export failed: $error');
@@ -31,7 +39,14 @@ void main(List<String> args) {
   }
 }
 
-void exportCatalogJson(String input, String destination, {String? previous}) {
+/// Relative edition `cover_url` values name files in [thumbnails], which are
+/// copied into the snapshot and inventoried apart from the catalog files.
+void exportCatalogJson(
+  String input,
+  String destination, {
+  String? previous,
+  String? thumbnails,
+}) {
   final output = p.normalize(p.absolute(destination));
   _requireAbsent(output);
   final db = sqlite3.open(input, mode: OpenMode.readOnly);
@@ -106,6 +121,30 @@ void exportCatalogJson(String input, String destination, {String? previous}) {
           );
         }
       }
+      final covers = <String, CatalogFile>{};
+      for (final row in db.select(
+        'SELECT DISTINCT cover_url FROM editions WHERE cover_url IS NOT NULL '
+        'ORDER BY cover_url',
+      )) {
+        final path = row['cover_url'] as String;
+        final uri = Uri.tryParse(path);
+        if (uri != null &&
+            (uri.scheme == 'https' || uri.scheme == 'http') &&
+            uri.host.isNotEmpty) {
+          continue;
+        }
+        if (thumbnails == null || !_thumbnailPath.hasMatch(path)) {
+          throw FormatException('Unexpected cover path: $path');
+        }
+        final name = p.basename(path);
+        final bytes = File(p.join(thumbnails, name)).readAsBytesSync();
+        Directory(p.join(staging.path, 'thumbnails')).createSync();
+        File(p.join(staging.path, path)).writeAsBytesSync(bytes);
+        covers[path] = (
+          sizeBytes: bytes.length,
+          sha256: sha256.convert(bytes).toString(),
+        );
+      }
       final sourceCounts = {
         for (final row in counts) row['source_id'] as String: row['count'],
       };
@@ -114,10 +153,11 @@ void exportCatalogJson(String input, String destination, {String? previous}) {
         final old = CatalogManifest.parse(
           File(p.join(previous, CatalogManifest.fileName)).readAsStringSync(),
         );
-        if (files.length == old.files.length &&
-            files.entries.every(
-              (entry) => old.files[entry.key] == entry.value,
-            ) &&
+        bool same(Map<String, CatalogFile> a, Map<String, CatalogFile> b) =>
+            a.length == b.length &&
+            a.entries.every((entry) => b[entry.key] == entry.value);
+        if (same(files, old.files) &&
+            same(covers, old.thumbnails) &&
             sourceCounts.length == old.sourceCounts.length &&
             sourceCounts.entries.every(
               (entry) => old.sourceCounts[entry.key] == entry.value,
@@ -136,14 +176,27 @@ void exportCatalogJson(String input, String destination, {String? previous}) {
               'sha256': entry.value.sha256,
             },
         },
+        if (covers.isNotEmpty)
+          'thumbnails': {
+            for (final entry in covers.entries)
+              entry.key: {
+                'sizeBytes': entry.value.sizeBytes,
+                'sha256': entry.value.sha256,
+              },
+          },
       });
+      // Fail here rather than publish a manifest that apps reject.
+      CatalogManifest.parse(manifest);
       File(
         p.join(staging.path, CatalogManifest.fileName),
       ).writeAsStringSync('$manifest\n');
       db.execute('COMMIT');
       _requireAbsent(output);
       staging.renameSync(output);
-      stdout.writeln('Wrote ${files.length} catalog partitions to $output');
+      stdout.writeln(
+        'Wrote ${files.length} catalog partitions and ${covers.length} '
+        'thumbnails to $output',
+      );
     } finally {
       if (staging.existsSync()) staging.deleteSync(recursive: true);
     }

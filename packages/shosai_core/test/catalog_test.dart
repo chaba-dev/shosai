@@ -297,6 +297,11 @@ void main() {
       _manifest(files: {..._files, 'https://example.com': _file}),
       // A descriptive table is listed completely or not at all.
       _manifest(files: {..._files, 'book_details/0.json': _file}),
+      // Thumbnails have their own inventory and blob-ID names.
+      _manifest(files: {..._files, 'thumbnails/${'a' * 40}.jpg': _file}),
+      _manifest()..['thumbnails'] = {'thumbnails/cover.jpg': _file},
+      _manifest()..['thumbnails'] = {'thumbnails/${'a' * 40}.png': _file},
+      _manifest()..['thumbnails'] = [],
     ];
     // Snapshots published before the descriptive tables remain valid.
     expect(CatalogManifest.parse(jsonEncode(_manifest())).files, hasLength(24));
@@ -313,8 +318,14 @@ void main() {
           ),
         ),
       ).files,
-      hasLength(41),
+      hasLength(42),
     );
+    final cover = 'thumbnails/${'a' * 40}.jpg';
+    final listed = CatalogManifest.parse(
+      jsonEncode(_manifest()..['thumbnails'] = {cover: _file}),
+    );
+    expect(listed.files, hasLength(24));
+    expect(listed.thumbnails.keys, [cover]);
     for (final input in invalid) {
       expect(
         () => CatalogManifest.parse(jsonEncode(input)),
