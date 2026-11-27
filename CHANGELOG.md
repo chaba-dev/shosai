@@ -87,6 +87,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Match the book page mock (#354)
 - *(shell)* Add a text link component (#355)
 - *(catalog)* Publish Gutenberg summaries, reading ease and author dates (#352)
+- *(catalog)* Import Standard Ebooks with cover thumbnails (#365)
 
 ### 🐛 Bug Fixes
 
