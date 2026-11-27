@@ -53,17 +53,21 @@ CatalogClient createCatalogFixture(
           [id, id],
         );
         // Project Gutenberg's published summary for ebook 1342.
-        db.execute('INSERT INTO book_details VALUES (?, ?, ?)', [
-          id,
-          '"Pride and Prejudice" by Jane Austen is a novel published in 1813. '
-              'It follows Elizabeth Bennet, who must learn to see past first '
-              'impressions and hasty judgments. When wealthy Mr. Darcy arrives '
-              "in their countryside neighborhood, his pride and Elizabeth's "
-              'prejudice set the stage for misunderstandings, hidden truths, '
-              'and unexpected revelations about character and love. (This is '
-              'an automatically generated summary.)',
-          69,
-        ]);
+        db.execute(
+          'INSERT INTO book_details (book_id, summary, reading_ease) '
+          'VALUES (?, ?, ?)',
+          [
+            id,
+            '"Pride and Prejudice" by Jane Austen is a novel published in 1813. '
+                'It follows Elizabeth Bennet, who must learn to see past first '
+                'impressions and hasty judgments. When wealthy Mr. Darcy arrives '
+                "in their countryside neighborhood, his pride and Elizabeth's "
+                'prejudice set the stage for misunderstandings, hidden truths, '
+                'and unexpected revelations about character and love. (This is '
+                'an automatically generated summary.)',
+            69,
+          ],
+        );
       }
       for (var e = 0; e < editionCount; e++) {
         db.execute(
@@ -97,7 +101,11 @@ CatalogClient createCatalogFixture(
   }
   final stage = '${root.path}/snapshot';
   exportCatalogJson('${root.path}/upstream.sqlite3', stage);
-  importCatalog(stage, File('$stage/manifest.json').readAsStringSync());
+  importCatalog(
+    stage,
+    File('$stage/manifest.json').readAsStringSync(),
+    Uri.parse('http://127.0.0.1:1/'),
+  );
   File('$stage/catalog.sqlite3').copySync('${root.path}/catalog.sqlite3');
   return CatalogClient(
     root.path,
