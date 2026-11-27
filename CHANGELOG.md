@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-26
+## [0.1.0] - 2026-11-27
 
 ### 🚀 Features
 
@@ -154,6 +154,7 @@ All notable changes to this project will be documented in this file.
 - *(shell)* Keep link focus visible to assistive technology (#361)
 - *(catalog)* Restore new Gutenberg releases and speed up the RDF import (#362)
 - *(catalog)* Use the independent catalog endpoint (#363)
+- *(catalog)* Preserve author years across Gutenberg records (#364)
 
 ### 🚜 Refactor
 
