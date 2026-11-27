@@ -763,7 +763,9 @@ Future<({int works, int editions, int skipped})> _importRows(
         if (agent != null) {
           write(
             'INSERT INTO author_details VALUES (?, ?, ?, ?) '
-            'ON CONFLICT (author_id) DO NOTHING',
+            'ON CONFLICT (author_id) DO UPDATE SET '
+            'birth_year = COALESCE(author_details.birth_year, excluded.birth_year), '
+            'death_year = COALESCE(author_details.death_year, excluded.death_year)',
             [
               authorId,
               readingOrder(agent['name'] as String),
