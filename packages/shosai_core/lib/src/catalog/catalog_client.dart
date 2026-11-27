@@ -285,8 +285,9 @@ Future<bool> _download(
         entry.value.sizeBytes,
       );
     }
-    // All files, including any future thumbnails, are checked before importing.
-    importCatalog(stage, text);
+    // Every listed file is checked before importing. Thumbnails are not
+    // listed here; covers load them when shown.
+    importCatalog(stage, text, origin);
     return true;
   } finally {
     client.close(force: true);

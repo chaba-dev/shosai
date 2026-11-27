@@ -244,8 +244,18 @@ ${[for (final (i, (birth, death)) in years.indexed) '''<p:ebook rdf:about="ebook
           'summary':
               'A novel of manners. (This is an automatically generated summary.)',
           'reading_ease': 69,
+          'description': null,
+          'word_count': null,
+          'released': null,
         },
-        {'book_id': 'gutenberg:417', 'summary': null, 'reading_ease': -13},
+        {
+          'book_id': 'gutenberg:417',
+          'summary': null,
+          'reading_ease': -13,
+          'description': null,
+          'word_count': null,
+          'released': null,
+        },
       ]);
       expect(
         db.select('SELECT support_url FROM sources').single['support_url'],
