@@ -118,6 +118,57 @@ void main() {
   });
 
   test(
+    'later RDF records fill missing author years without replacing known years',
+    () async {
+      final dir = tempDataDirectory();
+      // Model the Nappi regression: one shared author has incomplete metadata
+      // in different books. Each year must be filled independently.
+      for (final (index, years) in [
+        [(null, null), (1923, null), (null, 2015)],
+        [(null, 2015), (1923, null), (null, null)],
+        [(1923, 2015), (1924, 2016), (null, null)],
+      ].indexed) {
+        final csv = File('${dir.path}/$index.csv')
+          ..writeAsStringSync(
+            'Text#,Type,Title,Language,Authors,Subjects,Bookshelves\n'
+            '${[for (var i = 1; i <= years.length; i++) '$i,Text,Book $i,en,"Nappi, Rudy, 1923-2015 [Illustrator]",,'].join('\n')}\n',
+          );
+        final rdf = File('${dir.path}/$index.rdf')
+          ..writeAsStringSync('''
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:p="http://www.gutenberg.org/2009/pgterms/"
+         xmlns:d="http://purl.org/dc/terms/">
+${[for (final (i, (birth, death)) in years.indexed) '''<p:ebook rdf:about="ebooks/${i + 1}">
+  <p:ill><p:agent rdf:about="2009/agents/59821"><p:name>Nappi, Rudy</p:name>
+    ${birth == null ? '' : '<p:birthdate>$birth</p:birthdate>'}
+    ${death == null ? '' : '<p:deathdate>$death</p:deathdate>'}
+  </p:agent></p:ill>
+  <d:hasFormat><p:file rdf:about="https://www.gutenberg.org/ebooks/${i + 1}.epub3.images">
+    <d:format><rdf:Description><rdf:value>application/epub+zip</rdf:value></rdf:Description></d:format>
+  </p:file></d:hasFormat>
+</p:ebook>'''].join('\n')}
+</rdf:RDF>
+''');
+        final output = File('${dir.path}/$index.sqlite');
+        await importGutenbergFile(csv, output, rdf: rdf);
+        final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+        try {
+          expect(db.select('SELECT * FROM author_details'), [
+            {
+              'author_id': 'gutenberg:Nappi, Rudy, 1923-2015 [Illustrator]',
+              'display_name': 'Rudy Nappi',
+              'birth_year': 1923,
+              'death_year': 2015,
+            },
+          ]);
+        } finally {
+          db.close();
+        }
+      }
+    },
+  );
+
+  test(
     'imports search metadata and only RDF-listed EPUBs with their sizes and rights',
     () async {
       final dir = tempDataDirectory();
