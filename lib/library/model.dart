@@ -62,6 +62,7 @@ final class LibraryImportSelection {
     required this.paths,
     required this.managed,
     this.directory = false,
+    this.handed = false,
     this.runner,
     this.cleanup,
     this.openSingleBook = false,
@@ -73,6 +74,7 @@ final class LibraryImportSelection {
     : paths = const [],
       managed = false,
       directory = false,
+      handed = false,
       runner = null,
       cleanup = null,
       openSingleBook = false;
@@ -80,6 +82,11 @@ final class LibraryImportSelection {
   final List<String> paths;
   final bool managed;
   final bool directory;
+
+  /// Files handed to Shōsai, by Choose files on a phone or tablet or by
+  /// another app: saved to the _Save new books to_ location under their own
+  /// names (RFD 12 outcome 6), not into private storage.
+  final bool handed;
   final LibraryImportRunner? runner;
   final Future<void> Function()? cleanup;
   final LibraryConnectionKind? connect;

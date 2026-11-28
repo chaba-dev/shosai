@@ -241,11 +241,22 @@ final class Library {
 
   /// Import one file. Failures are reported in the item; only cancellation
   /// before the commit throws.
+  ///
+  /// [replaceCopies], for a managed import, makes the private copy the one
+  /// the book opens from: the book's recorded copies in other locations are
+  /// dropped in the same commit. Use it only when those copies failed to
+  /// read; the book's identity and its source admissions stay.
   Future<ImportItem> importFile(
     String selected, {
     required bool managed,
+    bool replaceCopies = false,
     CancellationToken? cancellation,
-  }) => _importFile(selected, managed: managed, cancellation: cancellation);
+  }) => _importFile(
+    selected,
+    managed: managed,
+    replaceCopies: replaceCopies,
+    cancellation: cancellation,
+  );
 
   /// [within], for a directory import, is the chosen folder: the file is
   /// resolved again here, and one that now resolves outside it (a folder
@@ -253,6 +264,7 @@ final class Library {
   Future<ImportItem> _importFile(
     String selected, {
     required bool managed,
+    bool replaceCopies = false,
     CancellationToken? cancellation,
     String? within,
   }) async {
@@ -283,7 +295,7 @@ final class Library {
       }
       cancellation.throwIfCancelled();
       final (book, duplicate) = managed
-          ? await _importManaged(path, format, cancellation)
+          ? await _importManaged(path, format, cancellation, replaceCopies)
           : await _importReferenced(path, format, cancellation);
       return ImportItem.imported(selected, book, duplicate: duplicate);
     } on CoreException catch (error) {
@@ -330,8 +342,9 @@ final class Library {
   Future<(Book, bool)> _importManaged(
     String source,
     BookFormat format,
-    CancellationToken? cancellation,
-  ) async {
+    CancellationToken? cancellation, [
+    bool replaceCopies = false,
+  ]) async {
     // Stage and publish only under the validated root: never under a fresh
     // resolution that a symlink may have pointed somewhere else.
     final root = await _validatedRoot(await _resolveManagedDirectory());
@@ -364,7 +377,9 @@ final class Library {
         if (current != null &&
             current.managed &&
             await fileHasFingerprint(current.path, fingerprint)) {
-          return (current, true);
+          if (!replaceCopies || !current.located) return (current, true);
+          // The intact private copy stays; only the copies that failed go.
+          return (await _records.replaceCopies(fingerprint.hash), true);
         }
         await _records.checkDestinationOwner(destination, fingerprint.hash);
         if (!await _resolvesTo(root)) throw _redirectedDirectory();
@@ -377,6 +392,7 @@ final class Library {
             format,
             fingerprint,
             metadata,
+            replaceCopies: replaceCopies,
           );
           switch (outcome) {
             case Committed(:final book, :final duplicate):

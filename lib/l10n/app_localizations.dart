@@ -1374,11 +1374,23 @@ abstract class AppLocalizations {
   /// **'Copy into managed storage'**
   String get importManagedCopy;
 
+  /// No description provided for @importHandedCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Save a copy'**
+  String get importHandedCopy;
+
   /// No description provided for @importPickedCopyHint.
   ///
   /// In en, this message translates to:
   /// **'Shōsai keeps its own copy of each picked book.'**
   String get importPickedCopyHint;
+
+  /// No description provided for @importHandedCopyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Shōsai saves a copy of each picked book where new books are saved.'**
+  String get importHandedCopyHint;
 
   /// No description provided for @importPrivateCopyHint.
   ///

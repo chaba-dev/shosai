@@ -248,7 +248,6 @@ final class LibraryFolders {
   >
   saveOptions() => _serial(() async {
     await _load();
-    final saved = await _preferences.get('device.library.save-location');
     final locations = _scanned;
     return (
       locations:
@@ -259,12 +258,18 @@ final class LibraryFolders {
                 generation: _generations[connection.id]!,
               ),
           ]),
-      selected: saved == 'private'
-          ? null
-          : locations.where((g) => g.id == saved).firstOrNull?.id ??
-                locations.firstOrNull?.id,
+      selected: await _saveLocation(),
     );
   });
+
+  Future<String?> _saveLocation() async {
+    final saved = await _preferences.get('device.library.save-location');
+    final locations = _scanned;
+    return saved == 'private'
+        ? null
+        : locations.where((g) => g.id == saved).firstOrNull?.id ??
+              locations.firstOrNull?.id;
+  }
 
   Future<void> selectSaveLocation(String? id) => _serial(() async {
     await _load();
@@ -295,15 +300,148 @@ final class LibraryFolders {
             _grant(locationId).directory != destination.directory)) {
       throw const CatalogDestinationChanged();
     }
+    return _saveNewBook(
+      path,
+      locationId: locationId,
+      source: source,
+      title: title,
+      author: author,
+      format: format,
+      cancellation: cancellation,
+    );
+  });
+
+  /// Books handed to Shōsai, by Choose files on a phone or tablet or by
+  /// another app opening them in Shōsai, go where catalog downloads go: the
+  /// _Save new books to_ location as it is now. There each keeps its own
+  /// [names] entry (by default its path's file name) at the top of the
+  /// location, cleaned and numbered like every name Shōsai writes (RFD 12,
+  /// Layout of the save location). The private library still names its
+  /// copies by content hash. Each file is reported on its own, continuing
+  /// past failures, as [Library.importPaths] does.
+  Future<ImportReport> saveHandedBooks(
+    List<String> paths, {
+    List<String>? names,
+    CancellationToken? cancellation,
+  }) async {
+    if (paths.length > maxSelectedImportPaths ||
+        (names != null && names.length != paths.length)) {
+      throw const CoreException.invalidRequest('Invalid handed books.');
+    }
+    var imported = 0, failed = 0, cancelled = false;
+    final items = <ImportItem>[];
+    for (final (index, path) in paths.indexed) {
+      if (cancellation?.isCancelled ?? false) {
+        cancelled = true;
+        break;
+      }
+      ImportItem item;
+      try {
+        item = await _serial(() async {
+          await _load(cancellation: cancellation);
+          checkBookPath(path);
+          final format = await detectBookFormat(path);
+          if (format == null) {
+            throw const CoreException(
+              CoreErrorKind.unsupported,
+              'Unsupported format.',
+            );
+          }
+          final name =
+              names?[index] ?? path.substring(path.lastIndexOf('/') + 1);
+          final dot = name.lastIndexOf('.');
+          final title = dot < 0 ? name : name.substring(0, dot);
+          // The record keeps the path it was saved from. A handed path can be
+          // reused for another book (iOS Inbox/Notes.pdf), so save from a
+          // fresh copy that is deleted afterwards, as catalog downloads do.
+          final staging = await Directory(await _newPath()).create();
+          try {
+            final staged =
+                '${staging.path}/${bookFileName(title, null, format.name)}';
+            await copyAndFingerprint(path, staged, cancellation: cancellation);
+            final saved = await _saveNewBook(
+              staged,
+              locationId: await _saveLocation(),
+              source: null,
+              title: title,
+              author: null,
+              format: format,
+              cancellation: cancellation,
+            );
+            return ImportItem.imported(
+              path,
+              saved.book,
+              duplicate: saved.existing,
+            );
+          } finally {
+            await staging.delete(recursive: true);
+          }
+        });
+      } on CoreException catch (error) {
+        if (error.kind == CoreErrorKind.cancelled) {
+          cancelled = true;
+          break;
+        }
+        item = ImportItem.failed(path, error.message);
+      } on LocationException catch (error) {
+        item = ImportItem.failed(path, 'Location ${error.failure.name}.');
+      } on FileSystemException catch (error) {
+        item = ImportItem.failed(
+          path,
+          'Could not import: ${error.osError?.message ?? error.message}',
+        );
+      }
+      item.book == null ? failed++ : imported++;
+      if (items.length < maxImportReportItems) items.add(item);
+    }
+    return ImportReport(
+      imported: imported,
+      failed: failed,
+      cancelled: cancelled,
+      items: List.unmodifiable(items),
+    );
+  }
+
+  /// Save [path] to [locationId], or to the private library when it is null.
+  /// A catalog download goes into its [source]'s folder; a null [source]
+  /// writes at the top of the location. Runs inside [_serial].
+  Future<({Book book, bool existing})> _saveNewBook(
+    String path, {
+    required String? locationId,
+    required String? source,
+    required String title,
+    required String? author,
+    required BookFormat format,
+    CancellationToken? cancellation,
+  }) async {
     final fingerprint = await fingerprintFile(path, cancellation: cancellation);
     final known = await _library.withContent(fingerprint.hash);
-    if (known != null && (known.located || await File(known.path).exists())) {
-      return (book: known, existing: true);
+    if (known != null) {
+      if (known.located) {
+        // Reuse a copy only when it still reads with these bytes; a missing
+        // one is saved again below and joins the same book by its hash.
+        try {
+          await _withBookFile(known, (_) async {}, cancellation: cancellation);
+          return (book: known, existing: true);
+        } on LocationException {
+          cancellation.throwIfCancelled();
+        }
+      } else if (await fileHasFingerprint(known.path, fingerprint)) {
+        return (book: known, existing: true);
+      } else if (known.managed) {
+        // A damaged private copy is repaired where it is, never moved.
+        locationId = null;
+      }
     }
     if (locationId == null) {
+      // A located book here failed to read just now, so its private copy
+      // becomes the one it opens from, in the same commit. Its source
+      // admissions stay: a scan recognizes those files, and Private stays
+      // the copy the book reads.
       final item = await _library.importFile(
         path,
         managed: true,
+        replaceCopies: known != null && known.located,
         cancellation: cancellation,
       );
       if (item.book == null) {
@@ -331,12 +469,14 @@ final class LibraryFolders {
     if (!await fingerprint.unchangedSince(path)) {
       throw const CoreException.conflict('The downloaded file changed.');
     }
-    final folder = await _saveFolder(
-      adapter,
-      grant.directory,
-      source,
-      cancellation,
-    );
+    final directory = source == null
+        ? grant.directory
+        : (await _saveFolder(
+            adapter,
+            grant.directory,
+            source,
+            cancellation,
+          )).key;
     final plain = bookFileName(title, author, format.name);
     final extension = '.${format.name}';
     final stem = bookNameKey(
@@ -352,7 +492,7 @@ final class LibraryFolders {
     );
     List<LocationEntry> matches = [];
     for (var attempt = 0; attempt < 8; attempt++) {
-      final entries = await _saveEntries(adapter, folder.key, cancellation);
+      final entries = await _saveEntries(adapter, directory, cancellation);
       matches = [];
       for (final entry in entries.where(
         (e) =>
@@ -418,7 +558,7 @@ final class LibraryFolders {
           await adapter.createFile(
             bookFileName(title, author, format.name, number: number),
             File(path).openRead(),
-            directory: folder.key,
+            directory: directory,
             cancellation: cancellation,
           ),
         ];
@@ -453,7 +593,7 @@ final class LibraryFolders {
       ),
     );
     return (book: (await _library.get(book.id))!, existing: item.existing);
-  });
+  }
 
   Future<List<LocationEntry>> _saveEntries(
     LibraryLocation location,
@@ -1188,7 +1328,16 @@ final class LibraryFolders {
     Future<T> Function(String path) read, {
     bool keep = false,
     CancellationToken? cancellation,
-  }) => _serial(() async {
+  }) => _serial(
+    () => _withBookFile(book, read, keep: keep, cancellation: cancellation),
+  );
+
+  Future<T> _withBookFile<T>(
+    Book book,
+    Future<T> Function(String path) read, {
+    bool keep = false,
+    CancellationToken? cancellation,
+  }) async {
     final copies = await _locations.copies(book.contentHash);
     if (copies.isEmpty) {
       if (book.locationFailure != null) {
@@ -1240,7 +1389,7 @@ final class LibraryFolders {
       }
     }
     throw lastFailure ?? const LocationException(LocationFailure.revoked);
-  });
+  }
 
   Future<void> setKept(
     int bookId,

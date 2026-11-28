@@ -756,6 +756,201 @@ void main() {
     },
   );
 
+  group('handed books', () {
+    late Directory handed;
+    setUp(() async {
+      handed = Directory('${root.path}/handed')..createSync();
+      // Production staging paths are unique per call, like DocumentSnapshots.
+      await folders.close();
+      var staged = 0;
+      folders = LibraryFolders(
+        Preferences(store),
+        library,
+        LibraryLocations(store),
+        () async => '${root.path}/stage-${staged++}',
+        BookFileCache(store, '${root.path}/cache'),
+      );
+    });
+
+    String hand(String name, [List<int>? content]) =>
+        (File('${handed.path}/$name')..writeAsBytesSync(content ?? bytes)).path;
+
+    test(
+      'are saved at the top of the save location under their cleaned names',
+      () async {
+        final target = await connect();
+        final pdf = File(
+          'packages/shosai_core/test/fixtures/sample.pdf',
+        ).readAsBytesSync();
+        final report = await folders.saveHandedBooks([
+          hand('Notes: Draft?.epub'),
+          hand('CON.pdf', pdf),
+        ]);
+        expect(report.failed, 0);
+        expect(report.imported, 2);
+        expect(target.listSync().map((e) => e.uri.pathSegments.last).toSet(), {
+          'Notes Draft.epub',
+          '_CON.pdf',
+        });
+        expect(
+          File('${target.path}/Notes Draft.epub').readAsBytesSync(),
+          bytes,
+        );
+        expect(report.items.map((i) => i.book!.located), [true, true]);
+        expect(Directory('${root.path}/books').existsSync(), false);
+      },
+    );
+
+    test('a taken name with other bytes gets the next number', () async {
+      final target = await connect();
+      File('${target.path}/NOTES.epub').writeAsBytesSync([1, 2, 3]);
+      Directory('${target.path}/notes (2).epub').createSync();
+      final report = await folders.saveHandedBooks([hand('Notes.epub')]);
+      expect(report.imported, 1);
+      expect(File('${target.path}/NOTES.epub').readAsBytesSync(), [1, 2, 3]);
+      expect(File('${target.path}/Notes (3).epub').readAsBytesSync(), bytes);
+    });
+
+    test(
+      'the same bytes under the plain name are adopted, not written again',
+      () async {
+        final target = await connect();
+        File('${target.path}/notes.EPUB').writeAsBytesSync(bytes);
+        final report = await folders.saveHandedBooks([hand('Notes.epub')]);
+        expect(report.imported, 1);
+        expect(target.listSync(), hasLength(1));
+        expect(
+          await folders.withBookFile(
+            report.items.single.book!,
+            (path) => File(path).readAsBytes(),
+          ),
+          bytes,
+        );
+      },
+    );
+
+    test(
+      'an extensionless staged copy takes the name it was handed under',
+      () async {
+        final target = await connect();
+        final report = await folders.saveHandedBooks(
+          [hand('Document')],
+          names: ['こころ.epub'],
+        );
+        expect(report.imported, 1);
+        expect(File('${target.path}/こころ.epub').readAsBytesSync(), bytes);
+      },
+    );
+
+    test(
+      'books already kept privately stay there; without a location new ones go private',
+      () async {
+        final private = await folders.saveHandedBooks([hand('Kept.epub')]);
+        final kept = private.items.single.book!;
+        expect(kept.managed, true);
+        expect(kept.path, endsWith('/books/${kept.contentHash}.epub'));
+        final target = await connect();
+        final again = await folders.saveHandedBooks([hand('Again.epub')]);
+        expect(again.items.single.duplicate, true);
+        expect(again.items.single.book!.id, kept.id);
+        expect(target.listSync(), isEmpty);
+        expect(File(kept.path).readAsBytesSync(), bytes);
+      },
+    );
+
+    test('a reused handed path saves each new book on its own', () async {
+      final target = await connect();
+      final pdf = File(
+        'packages/shosai_core/test/fixtures/sample.pdf',
+      ).readAsBytesSync();
+      final first = await folders.saveHandedBooks([hand('Notes.pdf', pdf)]);
+      final second = await folders.saveHandedBooks([
+        hand('Notes.pdf', [...pdf, 10]),
+      ]);
+      expect(first.failed + second.failed, 0);
+      expect(second.items.single.book!.id, isNot(first.items.single.book!.id));
+      expect(
+        await folders.withBookFile(
+          second.items.single.book!,
+          (path) => File(path).readAsBytes(),
+        ),
+        [...pdf, 10],
+      );
+      expect(target.listSync(), hasLength(2));
+    });
+
+    test('a saved copy that went missing is saved again', () async {
+      final target = await connect();
+      final first = await folders.saveHandedBooks([hand('Notes.epub')]);
+      File('${target.path}/Notes.epub').deleteSync();
+      for (final cached in Directory('${root.path}/cache').listSync()) {
+        cached.deleteSync(recursive: true);
+      }
+      final again = await folders.saveHandedBooks([hand('Notes.epub')]);
+      expect(again.failed, 0);
+      expect(again.items.single.book!.id, first.items.single.book!.id);
+      expect(File('${target.path}/Notes.epub').readAsBytesSync(), bytes);
+    });
+
+    test(
+      'a missing saved copy handed back to Private opens privately',
+      () async {
+        final target = await connect();
+        final first = await folders.saveHandedBooks([hand('Notes.epub')]);
+        File('${target.path}/Notes.epub').deleteSync();
+        for (final cached in Directory('${root.path}/cache').listSync()) {
+          cached.deleteSync(recursive: true);
+        }
+        await expectLater(
+          folders.withBookFile(first.items.single.book!, (_) async {}),
+          throwsA(isA<LocationException>()),
+        );
+        await folders.selectSaveLocation(null);
+        final again = await folders.saveHandedBooks([hand('Notes.epub')]);
+        final book = again.items.single.book!;
+        expect(book.id, first.items.single.book!.id);
+        expect(book.managed, true);
+        expect(book.locationFailure, isNull);
+        final reopened = (await library.get(book.id))!;
+        expect(reopened.locationFailure, isNull);
+        expect(
+          await folders.withBookFile(
+            reopened,
+            (path) => File(path).readAsBytes(),
+          ),
+          bytes,
+        );
+        expect(target.listSync(), isEmpty);
+      },
+    );
+
+    test('a damaged private copy is repaired where it is', () async {
+      final kept = (await folders.saveHandedBooks([
+        hand('Kept.epub'),
+      ])).items.single.book!;
+      File(kept.path).writeAsBytesSync([1, 2, 3, 4, 5, 6, 7]);
+      final target = await connect();
+      final again = await folders.saveHandedBooks([hand('Kept.epub')]);
+      expect(again.items.single.book!.id, kept.id);
+      expect(File(kept.path).readAsBytesSync(), bytes);
+      expect(target.listSync(), isEmpty);
+    });
+
+    test('a failed file is reported and the rest are still saved', () async {
+      final target = await connect();
+      final report = await folders.saveHandedBooks([
+        hand('broken.epub', [0, 1, 2]),
+        hand('Fine.epub'),
+      ]);
+      expect(report.failed, 1);
+      expect(report.imported, 1);
+      expect(report.items.first.error, isNotNull);
+      expect(target.listSync().map((e) => e.uri.pathSegments.last), [
+        'Fine.epub',
+      ]);
+    });
+  });
+
   test(
     'private choice survives reconnects and mobile never offers folder sources',
     () async {

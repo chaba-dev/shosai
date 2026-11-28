@@ -581,6 +581,20 @@ final class CoreRecords implements ShosaiRecords {
   });
 
   @override
+  Future<FlutterImportReport> saveHandedBooks({
+    required List<String> pathKeys,
+    List<String>? names,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final report = await _core.folders.saveHandedBooks(
+      [for (final key in pathKeys) pdfPathFromKey(key)],
+      names: names,
+      cancellation: _token(cancellationId),
+    );
+    return _importReport(report, pathKeys);
+  });
+
+  @override
   Future<FlutterImportReport> importDirectory({
     required String pathKey,
     required bool managed,

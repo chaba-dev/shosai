@@ -108,11 +108,34 @@ final class LibraryRecords {
     String destination,
     BookFormat format,
     FileFingerprint fingerprint,
-    BookMetadata? metadata,
-  ) => _store.transaction(
-    (db) =>
-        _commitManaged(db, source, destination, format, fingerprint, metadata),
-  );
+    BookMetadata? metadata, {
+    bool replaceCopies = false,
+  }) => _store.transaction((db) {
+    final outcome = _commitManaged(
+      db,
+      source,
+      destination,
+      format,
+      fingerprint,
+      metadata,
+    );
+    if (replaceCopies && outcome is Committed) {
+      _dropCopies(db, fingerprint.hash);
+      return Committed(
+        _bookById(db, outcome.book.id)!,
+        duplicate: outcome.duplicate,
+      );
+    }
+    return outcome;
+  });
+
+  /// Make the book with [contentHash] open from its private copy: its
+  /// recorded copies elsewhere are dropped. Source admissions stay, so a scan
+  /// recognizes those files without making them its copies again.
+  Future<Book> replaceCopies(String contentHash) => _store.transaction((db) {
+    _dropCopies(db, contentHash);
+    return _bookByHash(db, contentHash)!;
+  });
 
   /// Returns the number of books updated (0 or 1).
   Future<int> updateProgress(int id, double progress) =>
@@ -499,6 +522,11 @@ void _checkDestinationOwner(Database db, String destination, String hash) {
     );
   }
 }
+
+void _dropCopies(Database db, String contentHash) => db.execute(
+  'DELETE FROM book_locators WHERE content_hash = ?',
+  [contentHash],
+);
 
 CommitOutcome _commitManaged(
   Database db,

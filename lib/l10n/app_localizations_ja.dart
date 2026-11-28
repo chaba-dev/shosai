@@ -742,7 +742,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get importManagedCopy => 'アプリ内にコピーを保存';
 
   @override
+  String get importHandedCopy => 'コピーを保存';
+
+  @override
   String get importPickedCopyHint => '選択した本のコピーをShōsai内に保存します。';
+
+  @override
+  String get importHandedCopyHint => '選択した本のコピーを新しい本の保存先に保存します。';
 
   @override
   String get importPrivateCopyHint => '読書用のコピーをShōsai内に保存します。';
