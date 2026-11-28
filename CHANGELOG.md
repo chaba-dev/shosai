@@ -161,6 +161,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Preserve author years across Gutenberg records (#364)
 - *(catalog)* Show the typographic cover while a cover downloads (#367)
 - *(catalog)* Stop doubling subjects written without spaces (#369)
+- *(annotations)* Record the content fingerprint's algorithm and version (#372)
 
 ### 🚜 Refactor
 
