@@ -43,6 +43,28 @@ void main() {
       );
     });
 
+    test('a book keeps its own direction, spreads and scrolling', () async {
+      final state = ReadingState(t.store);
+      const chosen = ReadingPosition(
+        unit: 3,
+        rightToLeft: false,
+        twoPages: true,
+        continuous: false,
+      );
+      await state.save(pdf.id, chosen, unitCount: 10);
+      expect(await state.load(pdf.id), chosen);
+      // Clearing a choice saves it as following the settings again.
+      await state.save(
+        pdf.id,
+        const ReadingPosition(unit: 4, rightToLeft: true),
+        unitCount: 10,
+      );
+      expect(
+        await state.load(pdf.id),
+        const ReadingPosition(unit: 4, rightToLeft: true),
+      );
+    });
+
     test('books keep independent positions', () async {
       final state = ReadingState(t.store);
 

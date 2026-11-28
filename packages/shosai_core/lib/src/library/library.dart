@@ -44,6 +44,7 @@ final class Library {
     required this.managedDirectory,
     Map<BookFormat, BookInspector> inspectors = const {
       BookFormat.epub: EpubInspector(),
+      BookFormat.cbz: CbzInspector(),
     },
   }) : _records = LibraryRecords(store),
        _inspectors = inspectors;

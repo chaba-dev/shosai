@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -79,7 +80,86 @@ ReaderController _controller({FlutterBridge? bridge}) => ReaderController(
   decoder: _unusedDecoder,
 );
 
+class _ComicBridge extends _PaperFitBridge {
+  _ComicBridge(String path) : _path = path, super();
+
+  final String _path;
+
+  @override
+  List<FlutterLibraryBook> get books => [
+    FlutterLibraryBook(
+      bookId: 7001,
+      title: 'Sample Manga',
+      format: FlutterBookFormat.cbz,
+      pathKey: _path,
+      managed: false,
+      progress: 0,
+      dateAdded: '2026-11-28T00:00:00Z',
+    ),
+  ];
+
+  @override
+  int get unitCount => 10;
+}
+
 void main() {
+  testWidgets(
+    'a comic opens in its manga direction and keeps a chosen direction',
+    (tester) async {
+      final manga = '${Directory.current.path}/fixtures/cbz/sample-manga.cbz';
+      final bridge = _ComicBridge(manga);
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) async {
+          final recorder = ui.PictureRecorder();
+          ui.Canvas(recorder);
+          final picture = recorder.endRecording();
+          final image = await picture.toImage(1, 1);
+          picture.dispose();
+          return image;
+        },
+      );
+      addTearDown(controller.dispose);
+      Future<void> ready() async {
+        for (var i = 0; i < 200; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+          if (!controller.model.busy &&
+              !controller.model.relayoutBusy &&
+              controller.model.pageImage != null) {
+            return;
+          }
+        }
+        fail('The comic did not become ready: ${controller.model.error}');
+      }
+
+      controller.dispatch(ReaderOpenRequested(manga, bookId: 7001));
+      await ready();
+      expect(controller.model.document?.format, FlutterBookFormat.cbz);
+      expect(controller.model.rightToLeft, isTrue);
+      expect(controller.model.typography.searchable, isFalse);
+
+      controller.dispatch(const ReaderTypographyChanged(rightToLeft: false));
+      await ready();
+      expect(controller.model.rightToLeft, isFalse);
+      await tester.runAsync(() => ReaderController.drainBookWrites(7001));
+      expect(bridge.positions[7001]?.rightToLeft, isFalse);
+      // A later page turn still saves the comic's choice.
+      controller.dispatch(const ReaderUnitRequested(2));
+      await ready();
+      await tester.runAsync(() => ReaderController.drainBookWrites(7001));
+      expect(bridge.positions[7001]?.unit, BigInt.two);
+      expect(bridge.positions[7001]?.rightToLeft, isFalse);
+
+      // Reopened, it reads in the saved direction, not the manga mark's.
+      controller.dispatch(ReaderOpenRequested(manga, bookId: 7001));
+      await ready();
+      expect(controller.model.rightToLeft, isFalse);
+    },
+  );
+
   testWidgets(
     'reusing a reader restores each paper fit without changing the default',
     (tester) async {

@@ -326,7 +326,10 @@ class _ReaderScreenState extends State<ReaderScreen>
         settings != null &&
         oldWidget.initialSettings?.continuous != settings.continuous) {
       _controller.dispatch(
-        ReaderTypographyChanged(continuous: settings.continuous),
+        ReaderTypographyChanged(
+          continuous: settings.continuous,
+          fromSettings: true,
+        ),
       );
     }
     if (_controllerInitialized &&
@@ -448,6 +451,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             widget.initialSettings?.pdfFit == null &&
             (widget.initialSettings?.pdfZoom ?? 0) == 0,
         zonesHintDismissed: widget.initialSettings?.zonesHintDismissed ?? false,
+        comicsRightToLeft: widget.initialSettings?.comicsRightToLeft ?? false,
         systemBars: (shown) {
           if (defaultTargetPlatform == TargetPlatform.android) {
             // Optional for embedded Flutter hosts without the Android adapter.

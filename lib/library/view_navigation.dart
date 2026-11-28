@@ -476,6 +476,7 @@ List<Widget> _libraryFormatEntries({
     (null, l10n.filterAll),
     (FlutterBookFormat.epub, l10n.filterFormatEpub),
     (FlutterBookFormat.pdf, l10n.filterFormatPdf),
+    (FlutterBookFormat.cbz, l10n.filterFormatCbz),
   ])
     LibraryNavigationButton(
       label: label,

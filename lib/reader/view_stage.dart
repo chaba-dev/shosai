@@ -574,7 +574,7 @@ class _ReaderFolio extends StatelessWidget {
             ? '${progress.percentage}%'
             : '',
       _ when page == null => '',
-      _ when model.document?.format != FlutterBookFormat.pdf =>
+      _ when !(model.document?.format.fixedPages ?? false) =>
         l10n.readerPageNumber(page),
       // One line under a PDF spread names both of its pages.
       _ => switch (lastOrdinal ??

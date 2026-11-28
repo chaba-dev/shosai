@@ -49,6 +49,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get filterFormatPdf => 'PDF';
 
   @override
+  String get filterFormatCbz => 'CBZ';
+
+  @override
   String get addBooksAction => 'Add books';
 
   @override
@@ -494,6 +497,27 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readerTwoPages => 'Two';
+
+  @override
+  String get readerDirection => 'Direction';
+
+  @override
+  String get readerLeftToRight => 'Left to right';
+
+  @override
+  String get readerRightToLeft => 'Right to left';
+
+  @override
+  String get readerScrolling => 'Reading';
+
+  @override
+  String get readerTurnPages => 'Turn pages';
+
+  @override
+  String get readerScroll => 'Scroll';
+
+  @override
+  String get readerComicChoicesHint => 'Saved for this comic.';
 
   @override
   String get readerPageInputLabel => 'Page';
@@ -1095,6 +1119,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsContinuousReadingHint =>
       'Scroll horizontal books and PDF Columns. Vertical books turn pages.';
+
+  @override
+  String get settingsComicDirection => 'Comics read right to left';
+
+  @override
+  String get settingsComicDirectionHint =>
+      'For comics not marked as manga. Manga always open right to left, and a direction chosen in a comic is kept for it.';
 
   @override
   String get settingsEpubTextSize => 'EPUB text size';

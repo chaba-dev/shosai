@@ -158,6 +158,12 @@ abstract class AppLocalizations {
   /// **'PDF'**
   String get filterFormatPdf;
 
+  /// Format names stay Latin in both locales; the value is identical in every catalog on purpose. CBZ is a comic book archive.
+  ///
+  /// In en, this message translates to:
+  /// **'CBZ'**
+  String get filterFormatCbz;
+
   /// Iced reference key: add-books. The Flutter action draws the plus as an icon, so the label carries no plus sign.
   ///
   /// In en, this message translates to:
@@ -899,6 +905,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Two'**
   String get readerTwoPages;
+
+  /// The comic Display field that chooses the reading direction; saved for that comic.
+  ///
+  /// In en, this message translates to:
+  /// **'Direction'**
+  String get readerDirection;
+
+  /// The left-to-right choice of the comic Direction field, as Western comics read.
+  ///
+  /// In en, this message translates to:
+  /// **'Left to right'**
+  String get readerLeftToRight;
+
+  /// The right-to-left choice of the comic Direction field, as manga read.
+  ///
+  /// In en, this message translates to:
+  /// **'Right to left'**
+  String get readerRightToLeft;
+
+  /// The comic Display field that chooses turning pages or scrolling through them; saved for that comic.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading'**
+  String get readerScrolling;
+
+  /// The page-turning choice of the comic Reading field.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn pages'**
+  String get readerTurnPages;
+
+  /// The continuous-scrolling choice of the comic Reading field.
+  ///
+  /// In en, this message translates to:
+  /// **'Scroll'**
+  String get readerScroll;
+
+  /// The hint under a comic's Direction, Reading and Pages fields: each comic keeps its own choices.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved for this comic.'**
+  String get readerComicChoicesHint;
 
   /// Iced reference key: page. The more panel's page-input placeholder.
   ///
@@ -1889,6 +1937,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Scroll horizontal books and PDF Columns. Vertical books turn pages.'**
   String get settingsContinuousReadingHint;
+
+  /// Settings switch: the reading direction of comics without a manga mark. Off means left to right.
+  ///
+  /// In en, this message translates to:
+  /// **'Comics read right to left'**
+  String get settingsComicDirection;
+
+  /// No description provided for @settingsComicDirectionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For comics not marked as manga. Manga always open right to left, and a direction chosen in a comic is kept for it.'**
+  String get settingsComicDirectionHint;
 
   /// No description provided for @settingsEpubTextSize.
   ///

@@ -1,10 +1,12 @@
 /// Book metadata and cover extraction for import.
 library;
 
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as image;
+import 'package:shosai_cbz/shosai_cbz.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 
 import '../cancellation.dart';
@@ -332,6 +334,138 @@ PublicationMetadata _publication(EpubInspection inspection) =>
       edition: inspection.edition,
       volume: inspection.volume,
     );
+
+/// A comic's ComicInfo.xml title, writers and language, and its first page
+/// as the cover. Reads the archive's directory, its metadata file and one
+/// page, never the whole file.
+final class CbzInspector implements BookInspector {
+  const CbzInspector({this.limits = const CbzLimits()});
+
+  final CbzLimits limits;
+
+  @override
+  Future<BookMetadata> inspect(
+    String path, {
+    CancellationToken? cancellation,
+  }) async {
+    final RandomAccessFile file;
+    try {
+      file = await File(path).open();
+    } on FileSystemException catch (error) {
+      throw CoreException(
+        CoreErrorKind.inaccessible,
+        'The comic cannot be read: ${error.osError?.message ?? error.message}',
+      );
+    }
+    try {
+      final size = await file.length();
+      return await _inspectComic(
+        CbzFileSource(file, size),
+        limits,
+        cancellation,
+      );
+    } on FileSystemException catch (error) {
+      throw CoreException(
+        CoreErrorKind.inaccessible,
+        'The comic cannot be read: ${error.osError?.message ?? error.message}',
+      );
+    } finally {
+      await file.close();
+    }
+  }
+}
+
+/// An unopened comic's metadata and cover, read through [location]'s byte
+/// ranges: the archive's directory, ComicInfo.xml and its first page, at most
+/// [maxPreviewReadBytes] in all.
+final class CbzPreviewer implements BookPreviewer {
+  const CbzPreviewer();
+
+  @override
+  Future<BookMetadata> preview(
+    LibraryLocation location,
+    LocationEntry entry, {
+    CancellationToken? cancellation,
+  }) async {
+    cancellation.throwIfCancelled();
+    final size =
+        entry.size ??
+        (await location.stat(entry.key, cancellation: cancellation)).size;
+    if (size == null) {
+      throw const CoreException(
+        CoreErrorKind.unsupported,
+        'The file has no known size.',
+      );
+    }
+    final ranges = PreviewRanges(
+      location,
+      entry.key,
+      size,
+      budget: maxPreviewReadBytes,
+      cancellation: cancellation,
+    );
+    try {
+      return await _inspectComic(
+        _RangedComic(ranges),
+        const CbzLimits(),
+        cancellation,
+      );
+    } on CoreException {
+      if (ranges.failure case final failure?) throw failure;
+      rethrow;
+    }
+  }
+}
+
+final class _RangedComic implements CbzSource {
+  _RangedComic(this._ranges);
+
+  final PreviewRanges _ranges;
+
+  @override
+  int get size => _ranges.size;
+
+  @override
+  Future<int> read(Uint8List buffer, int position, int length) =>
+      _ranges.read(buffer, position, length);
+}
+
+Future<BookMetadata> _inspectComic(
+  CbzSource source,
+  CbzLimits limits,
+  CancellationToken? cancellation,
+) async {
+  try {
+    final archive = await CbzArchive.open(source, limits: limits);
+    cancellation.throwIfCancelled();
+    final info = await archive.comicInfo();
+    cancellation.throwIfCancelled();
+    Uint8List? cover;
+    try {
+      cover = await _thumbnailOffIsolate(await archive.pageBytes(0));
+    } on CbzFormatError {
+      cover = null; // A damaged first page leaves the comic without a cover.
+    }
+    cancellation.throwIfCancelled();
+    return BookMetadata(
+      title: info.displayTitle,
+      author: info.writers.isEmpty ? null : info.writers.join(', '),
+      publication: PublicationMetadata(
+        title: info.displayTitle,
+        contributors: info.writers,
+        language: info.language,
+        volume: info.volume,
+      ),
+      cover: cover,
+    );
+  } on CbzProtectedError {
+    return const BookMetadata(protection: BookProtection.drm);
+  } on CbzLimitError catch (error) {
+    throw CoreException.limitExceeded(error.message);
+  } on CbzFormatError catch (error) {
+    throw CoreException.malformed('The comic cannot be read: ${error.message}');
+  }
+}
 
 /// [coverThumbnail] on another isolate. A closure sends its whole context,
 /// so this one is made where nothing else is in scope.

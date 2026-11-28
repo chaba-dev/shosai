@@ -101,7 +101,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
 
   Rect? _pdfBounds(ReaderModel model) {
     final image = model.pageImage;
-    if (model.document?.format != FlutterBookFormat.pdf || image == null) {
+    if (!(model.document?.format.fixedPages ?? false) || image == null) {
       return null;
     }
     final boundary =
@@ -167,7 +167,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
       if (_outgoing == null) {
         _turnSpread =
             oldWidget.spread &&
-            (before.document?.format != FlutterBookFormat.pdf ||
+            (!(before.document?.format.fixedPages ?? false) ||
                 before.pdfSpread != null);
         _pageRect = _pdfBounds(before);
         _outgoing = _capture();
@@ -313,7 +313,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
       _delta = delta;
       _turnSpread =
           widget.spread &&
-          (model.document?.format != FlutterBookFormat.pdf ||
+          (!(model.document?.format.fixedPages ?? false) ||
               model.pdfSpread != null);
       _pageRect = _pdfBounds(model);
       if (_motion) _outgoing = _capture();

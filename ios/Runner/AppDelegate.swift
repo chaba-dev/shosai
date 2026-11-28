@@ -56,7 +56,7 @@ final class OpenedDocuments: NSObject, FlutterSceneLifeCycleDelegate {
   /// Takes the books among [contexts]; anything else is left to others.
   private func receive(_ contexts: Set<UIOpenURLContext>) -> Bool {
     let paths = contexts.map(\.url).filter { url in
-      url.isFileURL && ["epub", "pdf"].contains(url.pathExtension.lowercased())
+      url.isFileURL && ["epub", "pdf", "cbz"].contains(url.pathExtension.lowercased())
     }.map(\.path)
     if paths.isEmpty { return false }
     for path in paths where !pending.contains(path) {

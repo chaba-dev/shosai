@@ -573,14 +573,13 @@ class _ReachableSelectableSurface extends StatelessWidget {
         ) => _ReaderPageGestures(
           model: model,
           dispatch: dispatch,
-          pdfScrollScale:
-              document.format == FlutterBookFormat.pdf && fit != BoxFit.contain
+          pdfScrollScale: document.format.fixedPages && fit != BoxFit.contain
               ? model.layout.scale *
                     (fit == BoxFit.fitWidth
                         ? constraints.maxWidth / surface.width
                         : 1)
               : null,
-          fittedZoom: document.format == FlutterBookFormat.pdf
+          fittedZoom: document.format.fixedPages
               ? model.typography.rasterZoom *
                     SurfaceTransform.create(
                       fit,
@@ -1464,7 +1463,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     }
     final page = widget.epubPage;
     if (page == null) {
-      if (widget.model.document?.format == FlutterBookFormat.pdf) {
+      if (widget.model.document?.format.fixedPages ?? false) {
         widget.dispatch(
           ReaderPdfLinkTapped(source.dx, source.dy, pageTap: pageTap),
         );
@@ -1531,7 +1530,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
         final epubPage = widget.epubPage;
         final pdfPageShadow =
             epubPage == null &&
-            widget.model.document?.format == FlutterBookFormat.pdf &&
+            (widget.model.document?.format.fixedPages ?? false) &&
             ShellLayout.forWidth(MediaQuery.sizeOf(context).width) !=
                 ShellLayout.phone;
         final contentPainter = epubPage == null
@@ -1627,8 +1626,8 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                     ),
                     (recognizer) => recognizer
                       ..enabled = () {
-                        return widget.model.document?.format ==
-                                FlutterBookFormat.pdf &&
+                        return (widget.model.document?.format.fixedPages ??
+                                false) &&
                             widget.model.selectionPhase ==
                                 ReaderSelectionPhase.idle;
                       }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'dart:ui' as ui;
@@ -515,6 +516,43 @@ void main() {
         }
       },
     );
+
+    testWidgets('a comic has no search or notes controls', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final manga = '${Directory.current.path}/fixtures/cbz/sample-manga.cbz';
+      final bridge = _ChromeBridge(
+        unitCount: 10,
+        books: [
+          FlutterLibraryBook(
+            bookId: 7001,
+            title: 'Sample Manga',
+            format: FlutterBookFormat.cbz,
+            pathKey: manga,
+            managed: false,
+            progress: 0,
+            dateAdded: '2026-11-28T00:00:00Z',
+          ),
+        ],
+      );
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: manga, initialBookId: 7001),
+      );
+      // The archive opens on the real event loop.
+      for (var round = 0; round < 200; round += 1) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 32));
+        if (_button(tester, 'reader-header-contents').enabled) break;
+      }
+      await revealReaderChrome(tester);
+
+      expect(_button(tester, 'reader-header-contents').enabled, isTrue);
+      expect(_button(tester, 'reader-header-typography').enabled, isTrue);
+      expect(find.byKey(const ValueKey('reader-header-search')), findsNothing);
+      expect(find.byKey(const ValueKey('reader-header-notes')), findsNothing);
+    });
 
     testWidgets('back on a phone leaves the reader through the injected '
         'adapter', (tester) async {

@@ -100,7 +100,7 @@ class _DocumentViewState extends State<_DocumentView> {
     // one whose text cannot be mapped, still uses its raster's hit-test frame.
     final surface =
         model.selectionSurface ??
-        (document.format == FlutterBookFormat.pdf && page != null
+        (document.format.fixedPages && page != null
             ? FlutterSelectionSurface(
                 width: page.width.toDouble(),
                 height: page.height.toDouble(),
@@ -596,7 +596,7 @@ ReaderMessage pageStepMessage(ReaderModel model, int delta) {
     return ReaderPageStepRequested(delta);
   }
   // A PDF read in spreads turns both pages of the spread.
-  if (model.layout.spread && model.document?.format == FlutterBookFormat.pdf) {
+  if (model.layout.spread && (model.document?.format.fixedPages ?? false)) {
     return ReaderUnitRequested(pdfSpreadStep(model.unit, delta), turn: true);
   }
   return ReaderUnitRequested(model.unit + delta, turn: true);

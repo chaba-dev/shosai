@@ -202,6 +202,14 @@ class _SettingsPage extends StatelessWidget {
                           },
                         ),
                       ),
+                      _SettingSwitch(
+                        title: l10n.settingsComicDirection,
+                        subtitle: l10n.settingsComicDirectionHint,
+                        value: value.comicsRightToLeft,
+                        onChanged: (rightToLeft) => onChanged(
+                          value.copyWith(comicsRightToLeft: rightToLeft),
+                        ),
+                      ),
                     ],
                   ],
                 ),

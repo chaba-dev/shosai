@@ -16,7 +16,12 @@ import org.robolectric.annotation.Config
 class OpenedDocumentsTest {
     @Test
     fun `VIEW and SEND accept only granted file schemes and supported types`() {
-        for (type in listOf("application/epub+zip", "application/pdf")) {
+        for (type in listOf(
+            "application/epub+zip",
+            "application/pdf",
+            "application/vnd.comicbook+zip",
+            "application/x-cbz",
+        )) {
             for (uri in listOf(Uri.parse("content://books/42"), Uri.parse("file:///books/a.pdf"))) {
                 assertEquals(uri, openedDocumentUri(Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)))
                 assertEquals(uri, openedDocumentUri(Intent(Intent.ACTION_SEND).setType(type)

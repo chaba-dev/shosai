@@ -25,6 +25,8 @@ dependencies:
   shadcn_ui: ^0.56.3
   shosai_core:
     path: packages/shosai_core
+  shosai_cbz:
+    path: packages/shosai_cbz
   shosai_epub:
     path: packages/shosai_epub
   url_launcher: ^6.3.3

@@ -426,6 +426,8 @@ private object DocumentImportChannel {
                 arrayOf(
                     "application/pdf",
                     "application/epub+zip",
+                    "application/vnd.comicbook+zip",
+                    "application/x-cbz",
                     "application/zip",
                     "application/octet-stream",
                 ),
@@ -588,7 +590,7 @@ private fun displayName(resolver: ContentResolver?, uri: Uri): String? {
 
 private fun documentFileName(candidate: String): String? {
     val extension = candidate.substringAfterLast('.', "").lowercase()
-    if (extension !in setOf("pdf", "epub")) return null
+    if (extension !in setOf("pdf", "epub", "cbz")) return null
     val stem = candidate.dropLast(extension.length + 1)
         .take(60)
         .map { character ->
@@ -599,9 +601,17 @@ private fun documentFileName(candidate: String): String? {
     return if (stem.isEmpty()) null else "$stem.$extension"
 }
 
+/** The types the manifest's VIEW and SEND filters advertise. */
+internal val openedDocumentTypes = setOf(
+    "application/epub+zip",
+    "application/pdf",
+    "application/vnd.comicbook+zip",
+    "application/x-cbz",
+)
+
 /** Explicit intents must meet the same contract as the advertised filters. */
 internal fun openedDocumentUri(intent: Intent?): Uri? {
-    if (intent?.type !in setOf("application/epub+zip", "application/pdf")) return null
+    if (intent?.type !in openedDocumentTypes) return null
     @Suppress("DEPRECATION")
     val uri = try {
         when (intent?.action) {

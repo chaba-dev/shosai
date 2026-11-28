@@ -24,6 +24,7 @@ final class ReaderSettings {
     this.pdfZoom = pdfZoomFitPage,
     this.pdfFit,
     this.twoPages = true,
+    this.comicsRightToLeft = false,
     this.animations = true,
     this.progress = ReaderProgress.page,
     this.zonesHintDismissed = false,
@@ -52,6 +53,11 @@ final class ReaderSettings {
   /// always one.
   final bool twoPages;
 
+  /// Read comics without a manga mark right to left, rather than left to
+  /// right. A comic marked as manga reads right to left either way, and a
+  /// direction chosen for one comic overrides both.
+  final bool comicsRightToLeft;
+
   /// Animate page turns.
   final bool animations;
 
@@ -78,6 +84,7 @@ final class ReaderSettings {
       other.pdfZoom == pdfZoom &&
       other.pdfFit == pdfFit &&
       other.twoPages == twoPages &&
+      other.comicsRightToLeft == comicsRightToLeft &&
       other.animations == animations &&
       other.progress == progress &&
       other.zonesHintDismissed == zonesHintDismissed;
@@ -91,6 +98,7 @@ final class ReaderSettings {
     pdfZoom,
     pdfFit,
     twoPages,
+    comicsRightToLeft,
     animations,
     progress,
     zonesHintDismissed,
@@ -113,6 +121,7 @@ const _epubLineSpacingKey = 'reader.epub_line_spacing';
 const _pdfZoomKey = 'reader.pdf_zoom';
 const _pdfFitKey = 'reader.pdf_fit';
 const _pagesKey = 'reader.pages';
+const _comicsDirectionKey = 'reader.comics_direction';
 const _animationsKey = 'reader.animations';
 const _progressKey = 'reader.progress';
 const _zonesHintKey = 'reader.zones_hint_dismissed';
@@ -162,6 +171,7 @@ final class ReaderSettingsStore {
       ),
       pdfFit: PdfFit.values.asNameMap()[stored[_pdfFitKey]],
       twoPages: stored[_pagesKey] != 'one',
+      comicsRightToLeft: stored[_comicsDirectionKey] == 'rtl',
       animations: stored[_animationsKey] != 'off',
       progress:
           ReaderProgress.values.asNameMap()[stored[_progressKey]] ??
@@ -186,6 +196,7 @@ final class ReaderSettingsStore {
       _pdfZoomKey: '${settings.pdfZoom}',
       _pdfFitKey: settings.pdfFit?.name ?? '',
       _pagesKey: settings.twoPages ? 'two' : 'one',
+      _comicsDirectionKey: settings.comicsRightToLeft ? 'rtl' : 'ltr',
       _animationsKey: settings.animations ? 'on' : 'off',
       _progressKey: settings.progress.name,
       _zonesHintKey: '${settings.zonesHintDismissed}',

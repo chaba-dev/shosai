@@ -28,11 +28,22 @@ const storeBusyTimeout = Duration(seconds: 5);
 /// transaction together with the `user_version` update that records it, so a
 /// process killed mid-migration leaves the previous version intact.
 final class Migration {
-  const Migration(this.version, this.name, this.sql);
+  const Migration(
+    this.version,
+    this.name,
+    this.sql, {
+    this.rebuildsReferencedTables = false,
+  });
 
   final int version;
   final String name;
   final String sql;
+
+  /// Whether [sql] rebuilds a table other tables reference, as changing a
+  /// CHECK constraint requires. Foreign keys are then off while it runs, so
+  /// dropping the old table cannot cascade into its children, and every
+  /// reference is checked before the migration commits.
+  final bool rebuildsReferencedTables;
 }
 
 /// A query body run on the store's worker isolate.
@@ -508,6 +519,20 @@ void _checkAdmission(Database db, int latest) {
 /// Apply [migration] unless the database, read under the write lock, already
 /// has it.
 void _migrate(Database db, Migration migration, int latest) {
+  // `PRAGMA foreign_keys` is a no-op inside a transaction.
+  if (migration.rebuildsReferencedTables) {
+    db.execute('PRAGMA foreign_keys = OFF');
+  }
+  try {
+    _migrateInTransaction(db, migration, latest);
+  } finally {
+    if (migration.rebuildsReferencedTables) {
+      db.execute('PRAGMA foreign_keys = ON');
+    }
+  }
+}
+
+void _migrateInTransaction(Database db, Migration migration, int latest) {
   db.execute('BEGIN IMMEDIATE');
   try {
     // Another instance may have migrated (or claimed a fresh file) since
@@ -521,6 +546,10 @@ void _migrate(Database db, Migration migration, int latest) {
       db.execute('PRAGMA application_id = $shosaiApplicationId');
     }
     db.execute(migration.sql);
+    if (migration.rebuildsReferencedTables &&
+        db.select('PRAGMA foreign_key_check').isNotEmpty) {
+      throw StateError('the rebuilt tables break a foreign key');
+    }
     db.execute('PRAGMA user_version = ${migration.version}');
     db.execute('COMMIT');
   } on CoreException {

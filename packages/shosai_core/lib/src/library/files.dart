@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
+import 'package:shosai_cbz/shosai_cbz.dart';
 
 import '../cancellation.dart';
 import '../errors.dart';
@@ -76,7 +77,8 @@ void checkBookPath(String path) {
 }
 
 /// The format of the file at [path]: by extension, else by content (a PDF
-/// header, or an EPUB's leading uncompressed `mimetype` entry).
+/// header, an EPUB's leading uncompressed `mimetype` entry, or a ZIP whose
+/// directory lists images, a comic).
 Future<BookFormat?> detectBookFormat(String path) async {
   final extension = p.extension(path);
   final byExtension = extension.isEmpty
@@ -108,6 +110,23 @@ Future<BookFormat?> detectBookFormat(String path) async {
       latin1.decode(header.sublist(30, 38)) == 'mimetype' &&
       latin1.decode(header.sublist(38, 58)) == 'application/epub+zip') {
     return BookFormat.epub;
+  }
+  // Any other ZIP is a comic when its directory lists images; only the
+  // directory is read.
+  if (_startsWith(header, 'PK\x03\x04')) {
+    try {
+      final file = await File(path).open();
+      try {
+        await CbzArchive.open(CbzFileSource(file, await file.length()));
+        return BookFormat.cbz;
+      } finally {
+        await file.close();
+      }
+    } on CbzProtectedError {
+      return BookFormat.cbz;
+    } on Exception {
+      return null;
+    }
   }
   return null;
 }

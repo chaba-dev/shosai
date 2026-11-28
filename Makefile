@@ -3,7 +3,7 @@
 .PHONY: test-packaged-linux test-packaged-macos test-packaged-android
 .PHONY: theme-tokens check-theme-tokens check-l10n-codegen
 .PHONY: design-system design-system-css check-design-system-css design-system-catalog
-.PHONY: epub-layout-fixtures check-epub-layout-fixtures
+.PHONY: epub-layout-fixtures check-epub-layout-fixtures cbz-fixtures check-cbz-fixtures
 .PHONY: dev linux-debug linux-release check-linux-bundle
 .PHONY: android-profile android-release check-android-apk
 .PHONY: android-production ios-device-production macos-production linux-production
@@ -82,6 +82,7 @@ test-scripts:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 		-s scripts/tests
 	$(MAKE) check-epub-layout-fixtures
+	$(MAKE) check-cbz-fixtures
 
 ## Regenerate the reader layout fixtures and their SHA256SUMS
 epub-layout-fixtures:
@@ -90,6 +91,14 @@ epub-layout-fixtures:
 ## Verify the reader layout fixtures remain reproducible
 check-epub-layout-fixtures:
 	python3 fixtures/epub-layout/generate.py --check
+
+## Regenerate the comic fixtures and their SHA256SUMS
+cbz-fixtures:
+	python3 fixtures/cbz/generate.py
+
+## Verify the comic fixtures remain reproducible
+check-cbz-fixtures:
+	python3 fixtures/cbz/generate.py --check
 
 ## Verify generated Flutter localizations match the ARB catalogs
 check-l10n-codegen:

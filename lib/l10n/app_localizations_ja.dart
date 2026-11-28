@@ -43,6 +43,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get filterFormatPdf => 'PDF';
 
   @override
+  String get filterFormatCbz => 'CBZ';
+
+  @override
   String get addBooksAction => '本を追加';
 
   @override
@@ -477,6 +480,27 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get readerTwoPages => '見開き';
+
+  @override
+  String get readerDirection => '方向';
+
+  @override
+  String get readerLeftToRight => '左から右';
+
+  @override
+  String get readerRightToLeft => '右から左';
+
+  @override
+  String get readerScrolling => '読み方';
+
+  @override
+  String get readerTurnPages => 'ページめくり';
+
+  @override
+  String get readerScroll => 'スクロール';
+
+  @override
+  String get readerComicChoicesHint => 'このコミックに保存されます。';
 
   @override
   String get readerPageInputLabel => 'ページ';
@@ -1032,6 +1056,13 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get settingsContinuousReadingHint =>
       '横書きの本とPDFの段組みをスクロールします。縦書きの本はページ単位で表示します。';
+
+  @override
+  String get settingsComicDirection => 'コミックを右から左に読む';
+
+  @override
+  String get settingsComicDirectionHint =>
+      'マンガ指定のないコミックに使います。マンガは常に右から左で開き、コミックごとに選んだ方向はそのコミックに保存されます。';
 
   @override
   String get settingsEpubTextSize => 'EPUB の文字サイズ';

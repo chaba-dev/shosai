@@ -571,6 +571,70 @@ ALTER TABLE library_source_files ADD COLUMN content_hash TEXT
     CHECK (content_hash IS NULL OR
            (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'));
 '''),
+  Migration(22, 'comic archives', '''
+-- CBZ comics join the library (RFD 10). SQLite cannot change a CHECK, so the
+-- tables that name formats are rebuilt with the same rows; foreign keys are
+-- off meanwhile, so dropping a parent does not cascade into its children.
+CREATE TABLE books_v22 (
+    id                   INTEGER PRIMARY KEY,
+    title                TEXT NOT NULL
+                         CHECK (length(CAST(title AS BLOB)) BETWEEN 1 AND 4096),
+    author               TEXT
+                         CHECK (author IS NULL OR length(CAST(author AS BLOB)) BETWEEN 1 AND 4096),
+    format               TEXT NOT NULL CHECK (format IN ('epub', 'pdf', 'cbz')),
+    file_path            TEXT NOT NULL UNIQUE
+                         CHECK (length(CAST(file_path AS BLOB)) BETWEEN 1 AND 16384),
+    storage_kind         TEXT NOT NULL CHECK (storage_kind IN ('referenced', 'managed')),
+    original_path        TEXT NOT NULL
+                         CHECK (length(CAST(original_path AS BLOB)) BETWEEN 1 AND 16384),
+    content_hash         TEXT NOT NULL UNIQUE
+                         CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    file_size            INTEGER NOT NULL CHECK (file_size >= 0),
+    cover                BLOB CHECK (cover IS NULL OR length(cover) BETWEEN 1 AND 524288),
+    progress             REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
+    date_added           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_read            TEXT,
+    publication_metadata TEXT,
+    display_name         TEXT,
+    source_folder        TEXT,
+    protection           TEXT NOT NULL DEFAULT 'none'
+                         CHECK (protection IN ('none', 'drm', 'password')),
+    protection_checked   INTEGER NOT NULL DEFAULT 0
+                         CHECK (protection_checked IN (0, 1))
+) STRICT;
+INSERT INTO books_v22 SELECT id, title, author, format, file_path, storage_kind,
+    original_path, content_hash, file_size, cover, progress, date_added,
+    last_read, publication_metadata, display_name, source_folder, protection,
+    protection_checked FROM books;
+DROP TABLE books;
+ALTER TABLE books_v22 RENAME TO books;
+CREATE INDEX books_library_order_idx
+    ON books(last_read DESC, date_added DESC, id DESC);
+CREATE INDEX books_format_library_order_idx
+    ON books(format, last_read DESC, date_added DESC, id DESC);
+
+CREATE TABLE book_file_cache_v22 (
+    content_hash TEXT PRIMARY KEY NOT NULL REFERENCES books(content_hash) ON DELETE CASCADE,
+    format TEXT NOT NULL CHECK (format IN ('epub', 'pdf', 'cbz')),
+    size INTEGER NOT NULL CHECK (size BETWEEN 0 AND 536870912),
+    kept INTEGER NOT NULL CHECK (kept IN (0, 1)),
+    accessed INTEGER NOT NULL CHECK (accessed > 0)
+) STRICT;
+INSERT INTO book_file_cache_v22 SELECT content_hash, format, size, kept, accessed
+    FROM book_file_cache;
+DROP TABLE book_file_cache;
+ALTER TABLE book_file_cache_v22 RENAME TO book_file_cache;
+CREATE INDEX book_file_cache_lru_idx ON book_file_cache(kept, accessed);
+
+-- A comic's own reading direction, spreads and scrolling; null follows the
+-- reader settings (and, for the direction, the book's manga mark).
+ALTER TABLE reading_state ADD COLUMN right_to_left INTEGER
+    CHECK (right_to_left IN (0, 1));
+ALTER TABLE reading_state ADD COLUMN two_pages INTEGER
+    CHECK (two_pages IN (0, 1));
+ALTER TABLE reading_state ADD COLUMN continuous INTEGER
+    CHECK (continuous IN (0, 1));
+''', rebuildsReferencedTables: true),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

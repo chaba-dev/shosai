@@ -73,6 +73,11 @@ extension on ReaderController {
   }
 
   void _pdfLinkTapped(double x, double y, ReaderPageTapped? pageTap) {
+    // A comic page has no links: the tap is only a page tap.
+    if (_model.document?.format == FlutterBookFormat.cbz) {
+      if (pageTap != null) dispatch(pageTap);
+      return;
+    }
     if (!_canPeek ||
         _model.document?.format != FlutterBookFormat.pdf ||
         !x.isFinite ||

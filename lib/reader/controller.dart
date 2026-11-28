@@ -33,6 +33,7 @@ import 'package:shosai_flutter/reader/epub/text_style.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
+import 'cbz/engine.dart';
 import 'pdf/engine.dart';
 import 'pdf/column_strip.dart';
 import 'pdf/column_selection.dart';
@@ -100,6 +101,7 @@ final class ReaderController implements Listenable {
         ),
     double? baseScale,
     bool zonesHintDismissed = false,
+    bool comicsRightToLeft = false,
     this.autoPdfFit = false,
     this.renderPdfAhead = true,
   }) : _bridge = bridge,
@@ -146,6 +148,9 @@ final class ReaderController implements Listenable {
        _typographyTheme = initialTypography.theme,
        _typographyContinuous = initialTypography.continuous,
        _typographyTwoPages = initialTypography.twoPages,
+       _settingsContinuous = initialTypography.continuous,
+       _settingsTwoPages = initialTypography.twoPages,
+       _comicsRightToLeft = comicsRightToLeft,
        _typographyAnimations = initialTypography.animations,
        _typographyProgress = initialTypography.progress,
        _rasterFit = initialTypography.rasterFit,
@@ -432,6 +437,24 @@ final class ReaderController implements Listenable {
   String _typographyTheme;
   bool _typographyContinuous;
   bool _typographyTwoPages;
+
+  /// The Settings values of continuous reading and Pages. A comic reads with
+  /// its own choices where it has them, and the next other book with these.
+  bool _settingsContinuous;
+  bool _settingsTwoPages;
+
+  /// The Settings direction for comics without a manga mark.
+  final bool _comicsRightToLeft;
+
+  /// The open comic's own choices, saved with its reading position; null
+  /// follows the settings (and, for the direction, its manga mark).
+  ({bool? rightToLeft, bool? twoPages, bool? continuous}) _comicChoices =
+      _noComicChoices;
+  static const _noComicChoices = (
+    rightToLeft: null,
+    twoPages: null,
+    continuous: null,
+  );
   bool _typographyAnimations;
   FlutterReaderProgress _typographyProgress;
   Timer? _chromeTimer;
@@ -2009,7 +2032,10 @@ final class ReaderController implements Listenable {
       // snapshot the bridge opened rather than the path, whose file may
       // have been replaced since.
       final PdfEngineDocument? pdf;
-      if (document.format == FlutterBookFormat.pdf) {
+      if (document.format == FlutterBookFormat.cbz) {
+        pdf = await CbzPageDocument.open(document.contentPath ?? path);
+        ownedPdf = pdf;
+      } else if (document.format.fixedPages) {
         pdf = await _pdfEngine.open(document.contentPath ?? path);
         ownedPdf = pdf;
       } else {
@@ -2066,7 +2092,26 @@ final class ReaderController implements Listenable {
       ReaderRasterFit? defaultPdfFit = pdfFitOverride == null
           ? null
           : ReaderRasterFit.values.byName(pdfFitOverride.name);
-      if (pdf != null && autoPdfFit && pdfFitOverride == null) {
+      // A comic opens a whole page at a time unless it chose otherwise, and
+      // in the direction it was last read, else its manga mark's, else the
+      // Settings default for comics.
+      final comicChoices = pdf is CbzPageDocument
+          ? (
+              rightToLeft: restored?.rightToLeft,
+              twoPages: restored?.twoPages,
+              continuous: restored?.continuous,
+            )
+          : null;
+      if (pdf is CbzPageDocument) {
+        pdf.rightToLeft =
+            restored?.rightToLeft ??
+            (pdf.markedRightToLeft || _comicsRightToLeft);
+        defaultPdfFit ??= ReaderRasterFit.fitPage;
+      }
+      if (pdf != null &&
+          autoPdfFit &&
+          pdfFitOverride == null &&
+          pdf is! CbzPageDocument) {
         final sample = <PdfPageGeometry>[];
         for (var page = 0; page < math.min(3, pdf.pageCount); page++) {
           try {
@@ -2124,6 +2169,7 @@ final class ReaderController implements Listenable {
           pdfX: place == null ? restored?.pdfX : null,
           defaultPdfFit: defaultPdfFit,
           pdfFitOverride: pdfFitOverride,
+          comicChoices: comicChoices,
           toolError: toolError,
           // A book opened at a note or search hit returns to where it was
           // left, or, opened from another book, to that book.
@@ -2272,6 +2318,11 @@ final class ReaderController implements Listenable {
       return;
     }
     _pdfDocument = message.pdfDocument;
+    _comicChoices = message.comicChoices ?? _noComicChoices;
+    // A comic reads with its own Pages and continuous choices; any other
+    // book with the Settings ones, which a comic never changes.
+    _typographyTwoPages = _comicChoices.twoPages ?? _settingsTwoPages;
+    _typographyContinuous = _comicChoices.continuous ?? _settingsContinuous;
     if (!_pdfChoiceExplicit) _pdfFitOverride = message.pdfFitOverride;
     if (message.defaultPdfFit case final fit? when !_pdfChoiceExplicit) {
       _rasterFit = fit;
@@ -2743,7 +2794,7 @@ final class ReaderController implements Listenable {
     // shows alone.
     final targetUnit =
         unit ??
-        (document.format == FlutterBookFormat.pdf
+        (document.format.fixedPages
             ? _model.readingLocation.unit
             : _model.unit);
     _requestedLayout = layout;
@@ -2847,7 +2898,7 @@ final class ReaderController implements Listenable {
     if (page == null || session == null || document == null || delta == 0) {
       // PDF touch zones turn the same whole spread as keys and swipes.
       _unitRequested(
-        document?.format == FlutterBookFormat.pdf && _model.layout.spread
+        (document?.format.fixedPages ?? false) && _model.layout.spread
             ? pdfSpreadStep(_model.unit, delta)
             : _model.unit + delta,
       );
@@ -3695,13 +3746,69 @@ final class ReaderController implements Listenable {
     // The view decides whether two pages fit and reports the spread with the
     // viewport, which lays the page out again; the setting needs no relayout
     // of its own.
-    if (message.twoPages case final twoPages?) _typographyTwoPages = twoPages;
+    // A comic's Pages, continuous and direction choices are its own, saved
+    // with its position; a Settings change still reaches the Settings values.
+    final comic =
+        document?.format == FlutterBookFormat.cbz && !message.fromSettings;
+    final comicBefore = _comicChoices;
+    if (message.twoPages case final twoPages?) {
+      _typographyTwoPages = twoPages;
+      if (comic) {
+        _comicChoices = (
+          rightToLeft: _comicChoices.rightToLeft,
+          twoPages: twoPages,
+          continuous: _comicChoices.continuous,
+        );
+      } else {
+        _settingsTwoPages = twoPages;
+      }
+    }
     if (message.animations case final animations?) {
       _typographyAnimations = animations;
     }
     if (message.progress case final progress?) _typographyProgress = progress;
     if (message.continuous case final continuous?) {
-      _typographyContinuous = continuous;
+      if (comic) {
+        _typographyContinuous = continuous;
+        _comicChoices = (
+          rightToLeft: _comicChoices.rightToLeft,
+          twoPages: _comicChoices.twoPages,
+          continuous: continuous,
+        );
+      } else {
+        _settingsContinuous = continuous;
+        if (_comicChoices.continuous == null) {
+          _typographyContinuous = continuous;
+        }
+      }
+    }
+    var directionChanged = false;
+    final comicDocument = _pdfDocument;
+    if (message.rightToLeft case final rightToLeft?
+        when comic && comicDocument is CbzPageDocument) {
+      directionChanged = comicDocument.rightToLeft != rightToLeft;
+      comicDocument.rightToLeft = rightToLeft;
+      _comicChoices = (
+        rightToLeft: rightToLeft,
+        twoPages: _comicChoices.twoPages,
+        continuous: _comicChoices.continuous,
+      );
+      _emit(_model.copyWith(pdfRightToLeft: rightToLeft));
+    }
+    if (comic && _comicChoices != comicBefore) {
+      if (document!.bookId case final bookId?) {
+        final location = _model.readingLocation;
+        _queueReadingStateSave(
+          bookId,
+          document.logicalUnitCount,
+          FlutterReadingState(
+            unit: BigInt.from(location.unit),
+            zoom: _model.layout.scale,
+            pdfFit: _pdfFitOverride,
+            progress: _bookProgress(_model),
+          ),
+        );
+      }
     }
     // The settings the library keeps are saved as they change, so the next
     // book opens with them too.
@@ -3711,7 +3818,9 @@ final class ReaderController implements Listenable {
       lineSpacing: _typographyLineSpacing == spacingBefore
           ? null
           : _typographyLineSpacing,
-      twoPages: _typographyTwoPages == pagesBefore ? null : _typographyTwoPages,
+      twoPages: comic || _typographyTwoPages == pagesBefore
+          ? null
+          : _typographyTwoPages,
       animations: _typographyAnimations == animationsBefore
           ? null
           : _typographyAnimations,
@@ -3733,7 +3842,7 @@ final class ReaderController implements Listenable {
       _rasterFit = fit;
       if (fit != ReaderRasterFit.manual) {
         _rasterZoom = fit == ReaderRasterFit.columns ? 1 : _baseScale;
-        if (document?.format == FlutterBookFormat.pdf) {
+        if (document?.format.fixedPages ?? false) {
           _pdfFitOverride = FlutterPdfFit.values.byName(fit.name);
           if (document!.bookId case final bookId?) {
             final location = _model.readingLocation;
@@ -3818,7 +3927,8 @@ final class ReaderController implements Listenable {
             before.rasterZoom == after.rasterZoom &&
             before.rasterFit == after.rasterFit &&
             before.continuous == after.continuous &&
-            !themeChanged)) {
+            !themeChanged &&
+            !directionChanged)) {
       return;
     }
     final relayout = ReaderLayout(
@@ -3841,9 +3951,7 @@ final class ReaderController implements Listenable {
       document,
       relayout,
       unit: _model.readingLocation.unit,
-      offset: document.format == FlutterBookFormat.pdf
-          ? null
-          : _model.readingLocation.offset,
+      offset: document.format.fixedPages ? null : _model.readingLocation.offset,
     );
   }
 
@@ -3917,7 +4025,7 @@ final class ReaderController implements Listenable {
     _emit(_model.copyWith(searchBusy: true, toolError: null));
     unawaited(() async {
       try {
-        final results = document.format == FlutterBookFormat.pdf
+        final results = document.format.fixedPages
             ? await (pdf ??
                       (throw StateError('PDF engine document is missing')))
                   .search(_searchQuery)
@@ -4090,7 +4198,7 @@ final class ReaderController implements Listenable {
         ? _PlaceNoteTarget(
             kind: kind,
             unit: unit,
-            offset: document!.format == FlutterBookFormat.pdf ? null : offset,
+            offset: document!.format.fixedPages ? null : offset,
           )
         : _PlaceNoteTarget(kind: kind);
     final generation = _model.generation;
@@ -4688,7 +4796,7 @@ final class ReaderController implements Listenable {
     BigInt cancellation, {
     PdfEngineDocument? pdf,
   }) {
-    if (document.format == FlutterBookFormat.pdf) {
+    if (document.format.fixedPages) {
       return PdfReaderText(
         pdf ??
             _pdfDocument ??
@@ -5601,6 +5709,17 @@ final class ReaderController implements Listenable {
     FlutterReadingState value,
   ) {
     if (_readingStatePersistenceBlocked) return;
+    // Every save of a comic's position carries its own choices, so no save
+    // forgets them.
+    final document = _model.document;
+    if (document?.format == FlutterBookFormat.cbz &&
+        document?.bookId == bookId) {
+      value = value.withComicChoices(
+        rightToLeft: _comicChoices.rightToLeft,
+        twoPages: _comicChoices.twoPages,
+        continuous: _comicChoices.continuous,
+      );
+    }
     final generation = _model.generation;
     final revision = ++_readingStateSaveRevision;
     _activeBridgeOperations += 1;

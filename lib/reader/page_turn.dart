@@ -92,7 +92,7 @@ extension on ReaderController {
       final document = origin.document;
       if (document == null) return;
       ReaderEpubPage? previewPage;
-      if (document.format == FlutterBookFormat.pdf) {
+      if (document.format.fixedPages) {
         final pdf = _pdfDocument;
         if (pdf == null) return;
         final unit = origin.layout.spread

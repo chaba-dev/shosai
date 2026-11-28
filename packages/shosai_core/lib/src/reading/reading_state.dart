@@ -16,6 +16,9 @@ final class ReadingPosition {
     this.pdfY,
     this.pdfX,
     this.pdfFit,
+    this.rightToLeft,
+    this.twoPages,
+    this.continuous,
   });
 
   final int unit;
@@ -31,6 +34,12 @@ final class ReadingPosition {
   /// This paper's explicit Aa choice; null inherits the Settings default.
   final PdfFit? pdfFit;
 
+  /// A comic's own reading direction, spreads and scrolling, chosen in the
+  /// reader; null follows the settings (and the book's manga mark).
+  final bool? rightToLeft;
+  final bool? twoPages;
+  final bool? continuous;
+
   @override
   bool operator ==(Object other) =>
       other is ReadingPosition &&
@@ -39,10 +48,23 @@ final class ReadingPosition {
       other.zoom == zoom &&
       other.pdfY == pdfY &&
       other.pdfX == pdfX &&
-      other.pdfFit == pdfFit;
+      other.pdfFit == pdfFit &&
+      other.rightToLeft == rightToLeft &&
+      other.twoPages == twoPages &&
+      other.continuous == continuous;
 
   @override
-  int get hashCode => Object.hash(unit, offset, zoom, pdfY, pdfX, pdfFit);
+  int get hashCode => Object.hash(
+    unit,
+    offset,
+    zoom,
+    pdfY,
+    pdfX,
+    pdfFit,
+    rightToLeft,
+    twoPages,
+    continuous,
+  );
 
   @override
   String toString() => 'ReadingPosition($unit, $offset, $zoom)';
@@ -134,7 +156,8 @@ ReadingPosition? _load(Database db, int bookId) {
   final hash = bookContentHash(db, bookId);
   final row = db
       .select(
-        '''SELECT unit, location_offset, zoom, pdf_y, pdf_x, pdf_fit FROM reading_state
+        '''SELECT unit, location_offset, zoom, pdf_y, pdf_x, pdf_fit,
+            right_to_left, two_pages, continuous FROM reading_state
        WHERE content_hash = ?''',
         [hash],
       )
@@ -147,14 +170,26 @@ ReadingPosition? _load(Database db, int bookId) {
     pdfY: row.columnAt(3) as double?,
     pdfX: row.columnAt(4) as double?,
     pdfFit: PdfFit.values.asNameMap()[row.columnAt(5)],
+    rightToLeft: _flag(row.columnAt(6)),
+    twoPages: _flag(row.columnAt(7)),
+    continuous: _flag(row.columnAt(8)),
   );
 }
+
+bool? _flag(Object? value) => value == null ? null : value == 1;
+
+int? _bit(bool? value) => switch (value) {
+  null => null,
+  true => 1,
+  false => 0,
+};
 
 void _save(Database db, int bookId, ReadingPosition position, double progress) {
   final hash = bookContentHash(db, bookId);
   db.execute(
-    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom, pdf_y, pdf_x, pdf_fit)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom,
+         pdf_y, pdf_x, pdf_fit, right_to_left, two_pages, continuous)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(content_hash) DO UPDATE SET
          unit = excluded.unit,
          location_offset = excluded.location_offset,
@@ -162,6 +197,9 @@ void _save(Database db, int bookId, ReadingPosition position, double progress) {
          pdf_y = excluded.pdf_y,
          pdf_x = excluded.pdf_x,
          pdf_fit = excluded.pdf_fit,
+         right_to_left = excluded.right_to_left,
+         two_pages = excluded.two_pages,
+         continuous = excluded.continuous,
          updated_at = excluded.updated_at''',
     [
       hash,
@@ -171,6 +209,9 @@ void _save(Database db, int bookId, ReadingPosition position, double progress) {
       position.pdfY,
       position.pdfX,
       position.pdfFit?.name,
+      _bit(position.rightToLeft),
+      _bit(position.twoPages),
+      _bit(position.continuous),
     ],
   );
   db.execute(

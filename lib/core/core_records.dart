@@ -66,6 +66,7 @@ final class ShosaiCore {
       inspectors: {
         BookFormat.epub: const EpubInspector(),
         BookFormat.pdf: PdfEngineInspector(pdfEngine),
+        BookFormat.cbz: const CbzInspector(),
       },
     );
     final core = ShosaiCore._(store, library, pdfEngine, dataDirectory);
@@ -97,6 +98,7 @@ final class ShosaiCore {
     previewers: {
       BookFormat.epub: const EpubPreviewer(),
       BookFormat.pdf: PdfEnginePreviewer(pdfEngine),
+      BookFormat.cbz: const CbzPreviewer(),
     },
     providers: [
       const FolderConnectionProvider(),
@@ -636,6 +638,7 @@ final class CoreRecords implements ShosaiRecords {
           ? null
           : FlutterPdfFit.values.byName(settings.pdfFit!.name),
       twoPages: settings.twoPages,
+      comicsRightToLeft: settings.comicsRightToLeft,
       animations: settings.animations,
       progress: FlutterReaderProgress.values.byName(settings.progress.name),
       zonesHintDismissed: settings.zonesHintDismissed,
@@ -665,6 +668,7 @@ final class CoreRecords implements ShosaiRecords {
                 ? null
                 : PdfFit.values.byName(value.pdfFit!.name),
             twoPages: value.twoPages,
+            comicsRightToLeft: value.comicsRightToLeft,
             animations: value.animations,
             progress: ReaderProgress.values.byName(value.progress.name),
             zonesHintDismissed: value.zonesHintDismissed,
@@ -770,6 +774,9 @@ final class CoreRecords implements ShosaiRecords {
             pdfFit: position.pdfFit == null
                 ? null
                 : FlutterPdfFit.values.byName(position.pdfFit!.name),
+            rightToLeft: position.rightToLeft,
+            twoPages: position.twoPages,
+            continuous: position.continuous,
           );
   });
 
@@ -790,6 +797,9 @@ final class CoreRecords implements ShosaiRecords {
         pdfFit: value.pdfFit == null
             ? null
             : PdfFit.values.byName(value.pdfFit!.name),
+        rightToLeft: value.rightToLeft,
+        twoPages: value.twoPages,
+        continuous: value.continuous,
       ),
       unitCount: unitCount.toInt(),
       lastUnit: value.lastUnit?.toInt(),
@@ -840,6 +850,8 @@ final class CoreRecords implements ShosaiRecords {
     required double scale,
     required BigInt cancellationId,
   }) => _guard(() async {
+    // A comic's pages have no text, so it is never annotated.
+    if (!document.format.hasText) return const <FlutterAnnotation>[];
     final bookId = document.bookId;
     final cancellation = _token(cancellationId);
     // A library book's annotations are its document's; a file opened
@@ -920,6 +932,10 @@ final class CoreRecords implements ShosaiRecords {
         end.toInt(),
         displayScale,
       ),
+      FlutterBookFormat.cbz => throw const CoreException(
+        CoreErrorKind.unsupported,
+        'Comic pages have no text to highlight.',
+      ),
     };
     final created = content != null
         ? await _core.annotations.createInContent(
@@ -977,6 +993,7 @@ final class CoreRecords implements ShosaiRecords {
     required ReaderText text,
     required BigInt cancellationId,
   }) => _guard(() async {
+    if (!document.format.hasText) return const <FlutterNote>[];
     const kinds = {AnnotationKind.pageNote, AnnotationKind.bookNote};
     final cancellation = _token(cancellationId);
     final resolved = switch (document.bookId) {
@@ -2192,11 +2209,13 @@ FlutterNoteEntry _noteEntry(NoteEntry note) => FlutterNoteEntry(
 BookFormat _bookFormat(FlutterBookFormat format) => switch (format) {
   FlutterBookFormat.epub => BookFormat.epub,
   FlutterBookFormat.pdf => BookFormat.pdf,
+  FlutterBookFormat.cbz => BookFormat.cbz,
 };
 
 FlutterBookFormat _flutterFormat(BookFormat format) => switch (format) {
   BookFormat.epub => FlutterBookFormat.epub,
   BookFormat.pdf => FlutterBookFormat.pdf,
+  BookFormat.cbz => FlutterBookFormat.cbz,
 };
 
 FlutterLibraryBook _libraryBook(Book book) => FlutterLibraryBook(

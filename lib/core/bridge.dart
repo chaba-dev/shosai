@@ -437,7 +437,18 @@ class FlutterAnnotationTextRange {
           end == other.end;
 }
 
-enum FlutterBookFormat { pdf, epub }
+enum FlutterBookFormat {
+  pdf,
+  epub,
+  cbz;
+
+  /// Whether the book is a sequence of fixed pages (a PDF or a comic) the
+  /// reader renders and zooms, rather than reflowable text.
+  bool get fixedPages => this != epub;
+
+  /// Whether the book has text to select, highlight, annotate and search.
+  bool get hasText => this != cbz;
+}
 
 class FlutterBookmark {
   final int id;
@@ -928,6 +939,9 @@ class FlutterReaderSettings {
 
   /// The Pages setting: two pages side by side where there is room for them.
   final bool twoPages;
+
+  /// Read comics without a manga mark right to left.
+  final bool comicsRightToLeft;
   final bool animations;
   final FlutterReaderProgress progress;
   final bool zonesHintDismissed;
@@ -941,6 +955,7 @@ class FlutterReaderSettings {
     required this.pdfZoom,
     this.pdfFit,
     this.twoPages = true,
+    this.comicsRightToLeft = false,
     this.animations = true,
     this.progress = FlutterReaderProgress.page,
     this.zonesHintDismissed = false,
@@ -958,6 +973,7 @@ class FlutterReaderSettings {
     double? pdfZoom,
     Object? pdfFit = _samePdfFit,
     bool? twoPages,
+    bool? comicsRightToLeft,
     bool? animations,
     FlutterReaderProgress? progress,
     bool? zonesHintDismissed,
@@ -972,6 +988,7 @@ class FlutterReaderSettings {
         ? this.pdfFit
         : pdfFit as FlutterPdfFit?,
     twoPages: twoPages ?? this.twoPages,
+    comicsRightToLeft: comicsRightToLeft ?? this.comicsRightToLeft,
     animations: animations ?? this.animations,
     progress: progress ?? this.progress,
     zonesHintDismissed: zonesHintDismissed ?? this.zonesHintDismissed,
@@ -987,6 +1004,7 @@ class FlutterReaderSettings {
       pdfZoom.hashCode ^
       pdfFit.hashCode ^
       twoPages.hashCode ^
+      comicsRightToLeft.hashCode ^
       animations.hashCode ^
       progress.hashCode ^
       zonesHintDismissed.hashCode ^
@@ -1004,6 +1022,7 @@ class FlutterReaderSettings {
           pdfZoom == other.pdfZoom &&
           pdfFit == other.pdfFit &&
           twoPages == other.twoPages &&
+          comicsRightToLeft == other.comicsRightToLeft &&
           animations == other.animations &&
           progress == other.progress &&
           zonesHintDismissed == other.zonesHintDismissed &&
@@ -1032,6 +1051,12 @@ class FlutterReadingState {
   /// Stored with the position, but never used as a restore address.
   final double? progress;
 
+  /// A comic's own reading direction, spreads and scrolling; null follows
+  /// the reader settings (and, for the direction, the manga mark).
+  final bool? rightToLeft;
+  final bool? twoPages;
+  final bool? continuous;
+
   const FlutterReadingState({
     required this.unit,
     this.offset,
@@ -1041,11 +1066,44 @@ class FlutterReadingState {
     this.pdfFit,
     this.lastUnit,
     this.progress,
+    this.rightToLeft,
+    this.twoPages,
+    this.continuous,
   });
 
+  /// This state with a comic's own choices.
+  FlutterReadingState withComicChoices({
+    bool? rightToLeft,
+    bool? twoPages,
+    bool? continuous,
+  }) => FlutterReadingState(
+    unit: unit,
+    offset: offset,
+    zoom: zoom,
+    pdfY: pdfY,
+    pdfX: pdfX,
+    pdfFit: pdfFit,
+    lastUnit: lastUnit,
+    progress: progress,
+    rightToLeft: rightToLeft,
+    twoPages: twoPages,
+    continuous: continuous,
+  );
+
   @override
-  int get hashCode =>
-      Object.hash(unit, offset, zoom, pdfY, pdfX, pdfFit, lastUnit, progress);
+  int get hashCode => Object.hash(
+    unit,
+    offset,
+    zoom,
+    pdfY,
+    pdfX,
+    pdfFit,
+    lastUnit,
+    progress,
+    rightToLeft,
+    twoPages,
+    continuous,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -1059,7 +1117,10 @@ class FlutterReadingState {
           pdfX == other.pdfX &&
           pdfFit == other.pdfFit &&
           lastUnit == other.lastUnit &&
-          progress == other.progress;
+          progress == other.progress &&
+          rightToLeft == other.rightToLeft &&
+          twoPages == other.twoPages &&
+          continuous == other.continuous;
 }
 
 /// Which words of a note matched a library search.

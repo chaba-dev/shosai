@@ -10,25 +10,29 @@ enum BookProtection { none, drm, password }
 /// Formats the library admits.
 enum BookFormat {
   pdf,
-  epub;
+  epub,
+  cbz;
 
   /// The format for a file extension (without the dot), ignoring case.
   static BookFormat? fromExtension(String extension) =>
       switch (extension.toLowerCase()) {
         'pdf' => BookFormat.pdf,
         'epub' => BookFormat.epub,
+        'cbz' => BookFormat.cbz,
         _ => null,
       };
 
   static BookFormat fromDatabase(String value) => switch (value) {
     'pdf' => BookFormat.pdf,
     'epub' => BookFormat.epub,
+    'cbz' => BookFormat.cbz,
     _ => throw CoreException.malformed('Unknown stored book format "$value".'),
   };
 
   String get displayName => switch (this) {
     BookFormat.pdf => 'PDF',
     BookFormat.epub => 'EPUB',
+    BookFormat.cbz => 'CBZ',
   };
 }
 

@@ -270,7 +270,7 @@ class _ReaderNotesPanel extends StatelessWidget {
   /// The book notes, then each section's page notes and highlights in
   /// reading order under the section's title.
   List<Widget> _cards(AppLocalizations l10n, bool enabled) {
-    final pdf = model.document?.format == FlutterBookFormat.pdf;
+    final pdf = model.document?.format.fixedPages ?? false;
     final entries = model.contents.status == ReaderContentsStatus.ready
         ? model.contents.entries
         : const <ReaderContentsEntry>[];

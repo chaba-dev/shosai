@@ -709,7 +709,7 @@ class _ReaderBackPill extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final palette = ShellPalette.of(context);
     final to = model.returnPoints.last;
-    final pdf = model.document?.format == FlutterBookFormat.pdf;
+    final pdf = model.document?.format.fixedPages ?? false;
     final label = to.book != null
         ? l10n.readerBackTo(to.book!.title)
         : pdf

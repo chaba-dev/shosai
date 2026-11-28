@@ -37,6 +37,44 @@ void main() {
     });
 
     test(
+      'reads a comic\'s ComicInfo and first page, else its file name',
+      () async {
+        final t = await TempLibrary.create(
+          inspectors: const {BookFormat.cbz: CbzInspector()},
+        );
+        String comic(String fixture, String name) {
+          final target = File(t.path(name));
+          File(
+            p.join('..', '..', 'fixtures', 'cbz', fixture),
+          ).copySync(target.path);
+          return canonicalBookPath(target.path);
+        }
+
+        final manga = await t.importBook(comic('sample-manga.cbz', 'm.cbz'));
+        expect(manga.format, BookFormat.cbz);
+        expect(manga.title, 'Sample Manga');
+        expect(manga.author, 'Test Author, Second Author');
+        expect(manga.hasCover, isTrue);
+        final cover = (await t.library.cover(manga.id))!;
+        expect(cover.sublist(0, 4), [0x89, 0x50, 0x4e, 0x47]);
+
+        final plain = await t.importBook(
+          comic('sample-comic.cbz', 'Night Shift 03.CBZ'),
+        );
+        expect(plain.format, BookFormat.cbz);
+        expect(plain.title, 'Night Shift 03');
+        expect(plain.author, isNull);
+        expect(plain.hasCover, isTrue);
+
+        final broken = File(t.path('broken.cbz'))
+          ..writeAsBytesSync([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
+        final item = await t.library.importFile(broken.path, managed: false);
+        expect(item.book, isNull);
+        expect(item.error, contains("cannot be read"));
+      },
+    );
+
+    test(
       'takes PDF metadata from the host inspector, else the file name',
       () async {
         final withInspector = await TempLibrary.create();
@@ -65,6 +103,18 @@ void main() {
 
         expect(pdf.format, BookFormat.pdf);
         expect(epub.format, BookFormat.epub);
+        final comic = File(t.path('Document 3'));
+        File(
+          p.join('..', '..', 'fixtures', 'cbz', 'sample-comic.cbz'),
+        ).copySync(comic.path);
+        expect(await detectBookFormat(comic.path), BookFormat.cbz);
+        // A ZIP of anything but images is still no book.
+        final notes = File(t.path('Document 4'))
+          ..writeAsBytesSync(
+            File(fixturePath('sample.epub')).readAsBytesSync().sublist(0, 4) +
+                List.filled(64, 0),
+          );
+        expect(await detectBookFormat(notes.path), isNull);
       },
     );
 
@@ -1507,7 +1557,7 @@ void main() {
 
       for (final malformed in <Map<String, Object?>>[
         {'title': ''},
-        {'format': 'cbz'},
+        {'format': 'cbr'},
         {'storage_kind': 'cloud'},
         {'content_hash': 'A' * 64},
         {'content_hash': 'a' * 63},

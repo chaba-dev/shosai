@@ -262,7 +262,7 @@ Future<ReaderPickedDocument?> pickReaderDocument({
         label:
             localizations?.importBooksType ??
             lookupAppLocalizations(const Locale('en')).importBooksType,
-        extensions: const ['pdf', 'epub'],
+        extensions: const ['pdf', 'epub', 'cbz'],
       ),
     ],
   );

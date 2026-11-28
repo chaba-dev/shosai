@@ -887,7 +887,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             acceptedTypeGroups: [
               XTypeGroup(
                 label: l10n.importBooksType,
-                extensions: ['pdf', 'epub'],
+                extensions: ['pdf', 'epub', 'cbz'],
               ),
             ],
             confirmButtonText: l10n.importReviewBooks,
@@ -912,9 +912,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       acceptedTypeGroups: [
         XTypeGroup(
           label: l10n.importBooksType,
-          extensions: ['pdf', 'epub'],
+          extensions: ['pdf', 'epub', 'cbz'],
           // iOS filters by UTI rather than extension.
-          uniformTypeIdentifiers: ['com.adobe.pdf', 'org.idpf.epub-container'],
+          uniformTypeIdentifiers: [
+            'com.adobe.pdf',
+            'org.idpf.epub-container',
+            'dev.shosai.cbz',
+          ],
         ),
       ],
       confirmButtonText: l10n.importReviewBooks,

@@ -42,6 +42,10 @@
   "@filterFormatPdf": {
     "description": "Format names stay Latin in both locales, as in the Iced reference; the value is identical in every catalog on purpose."
   },
+  "filterFormatCbz": "CBZ",
+  "@filterFormatCbz": {
+    "description": "Format names stay Latin in both locales; the value is identical in every catalog on purpose. CBZ is a comic book archive."
+  },
   "addBooksAction": "Add books",
   "@addBooksAction": {
     "description": "Iced reference key: add-books. The Flutter action draws the plus as an icon, so the label carries no plus sign."
@@ -711,6 +715,34 @@
   "@readerTwoPages": {
     "description": "NEW: no Iced string. The two-page (spread) choice of the Pages field."
   },
+  "readerDirection": "Direction",
+  "@readerDirection": {
+    "description": "The comic Display field that chooses the reading direction; saved for that comic."
+  },
+  "readerLeftToRight": "Left to right",
+  "@readerLeftToRight": {
+    "description": "The left-to-right choice of the comic Direction field, as Western comics read."
+  },
+  "readerRightToLeft": "Right to left",
+  "@readerRightToLeft": {
+    "description": "The right-to-left choice of the comic Direction field, as manga read."
+  },
+  "readerScrolling": "Reading",
+  "@readerScrolling": {
+    "description": "The comic Display field that chooses turning pages or scrolling through them; saved for that comic."
+  },
+  "readerTurnPages": "Turn pages",
+  "@readerTurnPages": {
+    "description": "The page-turning choice of the comic Reading field."
+  },
+  "readerScroll": "Scroll",
+  "@readerScroll": {
+    "description": "The continuous-scrolling choice of the comic Reading field."
+  },
+  "readerComicChoicesHint": "Saved for this comic.",
+  "@readerComicChoicesHint": {
+    "description": "The hint under a comic's Direction, Reading and Pages fields: each comic keeps its own choices."
+  },
   "readerPageInputLabel": "Page",
   "@readerPageInputLabel": {
     "description": "Iced reference key: page. The more panel's page-input placeholder."
@@ -1143,6 +1175,9 @@
   "settingsReaderTheme": "Reader theme",
   "settingsContinuousReading": "Continuous reading",
   "settingsContinuousReadingHint": "Scroll horizontal books and PDF Columns. Vertical books turn pages.",
+  "settingsComicDirection": "Comics read right to left",
+  "@settingsComicDirection": {"description": "Settings switch: the reading direction of comics without a manga mark. Off means left to right."},
+  "settingsComicDirectionHint": "For comics not marked as manga. Manga always open right to left, and a direction chosen in a comic is kept for it.",
   "settingsEpubTextSize": "EPUB text size",
   "settingsEpubLineSpacing": "EPUB line spacing",
   "settingsPdfZoom": "PDF zoom",

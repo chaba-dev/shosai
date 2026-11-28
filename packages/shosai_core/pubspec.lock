@@ -345,6 +345,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.0"
+  shosai_cbz:
+    dependency: "direct main"
+    description:
+      path: "../shosai_cbz"
+      relative: true
+    source: path
+    version: "0.1.0"
   shosai_epub:
     dependency: "direct main"
     description:

@@ -689,7 +689,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
       l10n,
       contents,
       dispatch,
-      pages: widget.model.document?.format == FlutterBookFormat.pdf,
+      pages: (widget.model.document?.format.fixedPages ?? false),
     ),
   };
 
@@ -823,6 +823,7 @@ class _ReaderDisplayPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final typography = model.typography;
+    final comic = typography.format == FlutterBookFormat.cbz;
     final enabled =
         model.document != null && !model.busy && !model.relayoutBusy;
     final percent =
@@ -933,20 +934,22 @@ class _ReaderDisplayPanel extends StatelessWidget {
                 children: [
                   _ReaderSegmented(
                     segments: [
-                      (
-                        key: const ValueKey('reader-typography-columns'),
-                        icon: null,
-                        label: l10n.readerColumns,
-                        selected:
-                            typography.rasterFit == ReaderRasterFit.columns,
-                        onPressed: enabled
-                            ? () => dispatch(
-                                const ReaderTypographyChanged(
-                                  rasterFit: ReaderRasterFit.columns,
-                                ),
-                              )
-                            : null,
-                      ),
+                      // Columns follow a PDF's text; a comic page has none.
+                      if (typography.format != FlutterBookFormat.cbz)
+                        (
+                          key: const ValueKey('reader-typography-columns'),
+                          icon: null,
+                          label: l10n.readerColumns,
+                          selected:
+                              typography.rasterFit == ReaderRasterFit.columns,
+                          onPressed: enabled
+                              ? () => dispatch(
+                                  const ReaderTypographyChanged(
+                                    rasterFit: ReaderRasterFit.columns,
+                                  ),
+                                )
+                              : null,
+                        ),
                       (
                         key: const ValueKey('reader-typography-fit-width'),
                         icon: null,
@@ -1048,12 +1051,73 @@ class _ReaderDisplayPanel extends StatelessWidget {
               ),
             ),
           ),
+          if (comic) ...[
+            _ReaderField(
+              label: l10n.readerDirection,
+              hint: l10n.readerComicChoicesHint,
+              child: _ReaderSegmented(
+                segments: [
+                  (
+                    key: const ValueKey('reader-comic-left-to-right'),
+                    icon: LucideIcons.arrowRight,
+                    label: l10n.readerLeftToRight,
+                    selected: !model.rightToLeft,
+                    onPressed: enabled
+                        ? () => dispatch(
+                            const ReaderTypographyChanged(rightToLeft: false),
+                          )
+                        : null,
+                  ),
+                  (
+                    key: const ValueKey('reader-comic-right-to-left'),
+                    icon: LucideIcons.arrowLeft,
+                    label: l10n.readerRightToLeft,
+                    selected: model.rightToLeft,
+                    onPressed: enabled
+                        ? () => dispatch(
+                            const ReaderTypographyChanged(rightToLeft: true),
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+            _ReaderField(
+              label: l10n.readerScrolling,
+              child: _ReaderSegmented(
+                segments: [
+                  (
+                    key: const ValueKey('reader-comic-turn-pages'),
+                    icon: null,
+                    label: l10n.readerTurnPages,
+                    selected: !typography.continuous,
+                    onPressed: enabled
+                        ? () => dispatch(
+                            const ReaderTypographyChanged(continuous: false),
+                          )
+                        : null,
+                  ),
+                  (
+                    key: const ValueKey('reader-comic-scroll'),
+                    icon: null,
+                    label: l10n.readerScroll,
+                    selected: typography.continuous,
+                    onPressed: enabled
+                        ? () => dispatch(
+                            const ReaderTypographyChanged(continuous: true),
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ],
           // A phone in portrait never has room for two pages, so Pages is
           // hidden there.
           if (!_phonePortrait(context))
             _ReaderField(
               label: l10n.readerPages,
-              hint: l10n.readerPagesHint,
+              hint: comic ? l10n.readerComicChoicesHint : l10n.readerPagesHint,
               child: _ReaderSegmented(
                 segments: [
                   (

@@ -552,6 +552,7 @@ void main() {
         expect(types['uniformTypeIdentifiers'], [
           'com.adobe.pdf',
           'org.idpf.epub-container',
+          'dev.shosai.cbz',
         ]);
 
         // The review keeps managed storage on: the inbox copies are temporary.

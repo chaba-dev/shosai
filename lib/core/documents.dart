@@ -17,6 +17,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'package:shosai_cbz/shosai_cbz.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/core/bridge.dart';
@@ -275,12 +276,13 @@ final class OpenDocuments {
         await detectBookFormat(path) ??
         (throw const CoreException(
           CoreErrorKind.unsupported,
-          'The file is neither an EPUB nor a PDF.',
+          'The file is not an EPUB, a PDF or a comic archive.',
         ));
     _checkAdmission(cancellation);
     final OpenDocument document = switch (kind) {
       BookFormat.epub => await _openEpub(path, expected, cancellation),
       BookFormat.pdf => await _openPdf(path, expected, cancellation),
+      BookFormat.cbz => await _openCbz(path, expected, cancellation),
     };
     try {
       _checkAdmission(cancellation);
@@ -380,6 +382,71 @@ final class OpenDocuments {
     }
   }
 
+  /// A comic is read like a PDF, from a private snapshot verified by its
+  /// content hash; the reader opens its pages from that snapshot.
+  Future<OpenDocument> _openCbz(
+    String path,
+    ExpectedBook? expected,
+    CancellationToken? cancellation,
+  ) async {
+    final snapshot = await _snapshots.newPath();
+    try {
+      final FileFingerprint fingerprint;
+      try {
+        fingerprint = await copyAndFingerprint(
+          path,
+          snapshot,
+          cancellation: cancellation,
+        );
+      } on CoreException catch (error) {
+        if (error.kind == CoreErrorKind.notFound) {
+          throw CoreException.notFound('There is no file at $path.');
+        }
+        rethrow;
+      }
+      _verify(fingerprint.hash, expected, path);
+      _checkAdmission(cancellation);
+      final file = await File(snapshot).open();
+      final CbzArchive archive;
+      final CbzComicInfo info;
+      try {
+        archive = await CbzArchive.open(
+          CbzFileSource(file, await file.length()),
+        );
+        info = await archive.comicInfo();
+      } on CbzProtectedError {
+        throw const CoreException(
+          CoreErrorKind.protected,
+          'The comic archive is encrypted.',
+        );
+      } on CbzLimitError catch (error) {
+        throw CoreException.limitExceeded(error.message);
+      } on CbzFormatError catch (error) {
+        throw CoreException.malformed(
+          'The comic cannot be read: ${error.message}',
+        );
+      } finally {
+        await file.close();
+      }
+      return OpenDocument._(
+        FlutterDocumentSummary(
+          handle: _nextHandle(),
+          bookId: expected?.bookId,
+          format: FlutterBookFormat.cbz,
+          title: expected?.title ?? info.displayTitle,
+          logicalUnitCount: BigInt.from(archive.pages.length),
+          contentPath: snapshot,
+        ),
+        path,
+        contentHash: fingerprint.hash,
+        snapshot: snapshot,
+      );
+    } catch (_) {
+      await _deleteQuietly(snapshot);
+      rethrow;
+    }
+  }
+
   /// The open document behind [handle].
   OpenDocument operator [](FlutterDocumentHandle handle) =>
       _open[handle] ??
@@ -462,8 +529,8 @@ final class OpenDocument {
   var _users = 0;
   Completer<void>? _idle;
 
-  /// The private copy a PDF is read from until it is released; null for an
-  /// EPUB, whose bytes were parsed when it opened.
+  /// The private copy a PDF or comic is read from until it is released;
+  /// null for an EPUB, whose bytes were parsed when it opened.
   String? get snapshotPath => _snapshot;
 
   /// Run [use] on this PDF's engine document. The document is not disposed
@@ -487,7 +554,7 @@ final class OpenDocument {
   /// This PDF's engine document over its snapshot, opened once.
   Future<PdfEngineDocument> _pdfDocument() {
     final snapshot = _snapshot;
-    if (_released || snapshot == null) {
+    if (_released || snapshot == null || _pdfEngine == null) {
       return Future.error(
         CoreException.invalidRequest(
           _released
@@ -496,7 +563,7 @@ final class OpenDocument {
         ),
       );
     }
-    return _pdf ??= openPdfDocument(_pdfEngine!, snapshot);
+    return _pdf ??= openPdfDocument(_pdfEngine, snapshot);
   }
 
   /// Once the operations using it have finished, dispose the engine

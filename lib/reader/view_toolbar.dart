@@ -79,16 +79,19 @@ class _ReaderToolbar extends StatelessWidget {
       title: model.document?.title ?? l10n.readerFallbackTitle,
       section: _currentSectionTitle(model, l10n),
     );
-    final search = _ReaderToolButton(
-      key: const ValueKey('reader-header-search'),
-      icon: LucideIcons.search,
-      label: l10n.readerSearchAction,
-      selected: model.searchOpen,
-      touch: layout.touch,
-      onPressed: enabled && model.typography.searchable
-          ? () => dispatch(const ReaderSearchToggled())
-          : null,
-    );
+    // A comic has no text to search, so it has no search control.
+    final search = model.typography.searchable
+        ? _ReaderToolButton(
+            key: const ValueKey('reader-header-search'),
+            icon: LucideIcons.search,
+            label: l10n.readerSearchAction,
+            selected: model.searchOpen,
+            touch: layout.touch,
+            onPressed: enabled
+                ? () => dispatch(const ReaderSearchToggled())
+                : null,
+          )
+        : null;
     final List<Widget> leading;
     final List<Widget> trailing;
     if (phone) {
@@ -102,7 +105,7 @@ class _ReaderToolbar extends StatelessWidget {
           onPressed: () => dispatch(const ReaderBackRequested()),
         ),
       ];
-      trailing = [search, ?openBooksAction];
+      trailing = [?search, ?openBooksAction];
     } else {
       leading = [
         _ReaderToolButton(
@@ -116,7 +119,7 @@ class _ReaderToolbar extends StatelessWidget {
               ? () => dispatch(const ReaderPanelToggled(ReaderPanel.contents))
               : null,
         ),
-        search,
+        ?search,
       ];
       trailing = _readerPageActions(
         context,
@@ -175,7 +178,7 @@ class _ReaderToolGroup extends StatelessWidget {
 }
 
 /// The reader's page actions in one order: Display settings (Aa), Bookmark,
-/// then Notes with its count.
+/// then Notes with its count, which a comic does not have.
 ///
 /// The toolbar shows them on desktop and tablet; on a phone they move to the
 /// bar under the page.
@@ -225,23 +228,25 @@ List<Widget> _readerPageActions(
           ? () => dispatch(const ReaderBookmarkToggled())
           : null,
     ),
-    _ReaderToolButton(
-      key: const ValueKey('reader-header-notes'),
-      icon: LucideIcons.messageSquareText,
-      text: includeNotesLabel ? l10n.readerNotesAction : null,
-      label: l10n.readerNotesAction,
-      count: switch (model.annotations.length + model.notes.length) {
-        0 => null,
-        final count => count,
-      },
-      countColor: palette.surfaceSunken,
-      selected: model.openPanel == ReaderPanel.notes,
-      touch: layout.touch,
-      focusNode: notesFocus,
-      onPressed: enabled
-          ? () => dispatch(const ReaderPanelToggled(ReaderPanel.notes))
-          : null,
-    ),
+    // A comic has no highlights or notes.
+    if (model.typography.searchable)
+      _ReaderToolButton(
+        key: const ValueKey('reader-header-notes'),
+        icon: LucideIcons.messageSquareText,
+        text: includeNotesLabel ? l10n.readerNotesAction : null,
+        label: l10n.readerNotesAction,
+        count: switch (model.annotations.length + model.notes.length) {
+          0 => null,
+          final count => count,
+        },
+        countColor: palette.surfaceSunken,
+        selected: model.openPanel == ReaderPanel.notes,
+        touch: layout.touch,
+        focusNode: notesFocus,
+        onPressed: enabled
+            ? () => dispatch(const ReaderPanelToggled(ReaderPanel.notes))
+            : null,
+      ),
   ];
 }
 
@@ -658,7 +663,7 @@ Widget _readerBookProgressTrack(
 /// the next or previous chapter or page, or a whole spread when a PDF is read
 /// in spreads, as the edges turn it. Past either end when there is none.
 int _unitStep(ReaderModel model, int delta) =>
-    model.layout.spread && model.document?.format == FlutterBookFormat.pdf
+    model.layout.spread && (model.document?.format.fixedPages ?? false)
     ? pdfSpreadStep(model.unit, delta)
     : model.unit + delta;
 

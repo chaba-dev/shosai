@@ -341,6 +341,7 @@ class LibraryController implements Listenable {
               epubLineSpacing: edited.epubLineSpacing,
               pdfZoom: edited.pdfZoom,
               pdfFit: edited.pdfFit,
+              comicsRightToLeft: edited.comicsRightToLeft,
             ),
           ),
         );

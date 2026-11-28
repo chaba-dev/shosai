@@ -104,6 +104,7 @@ class _EditionCard extends StatelessWidget {
                             for (final format in [
                               BookFormat.epub,
                               BookFormat.pdf,
+                              BookFormat.cbz,
                             ])
                               if (edition.formats.contains(format))
                                 ShellFormatBadge(
@@ -212,7 +213,11 @@ class LibraryQuickPicker extends StatelessWidget {
                 ).copyWith(color: palette.inkMuted),
               ),
               const SizedBox(height: 16),
-              for (final type in [BookFormat.epub, BookFormat.pdf])
+              for (final type in [
+                BookFormat.epub,
+                BookFormat.pdf,
+                BookFormat.cbz,
+              ])
                 if (format == null || type.name == format!.name)
                   for (final file in edition.files.where(
                     (f) => f.format == type,

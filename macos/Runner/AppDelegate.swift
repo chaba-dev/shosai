@@ -56,7 +56,7 @@ final class OpenedDocuments {
 
   func receive(_ urls: [URL]) {
     for url in urls where url.isFileURL &&
-      ["epub", "pdf"].contains(url.pathExtension.lowercased()) {
+      ["epub", "pdf", "cbz"].contains(url.pathExtension.lowercased()) {
       guard outstanding < 256 else { break }
       outstanding += 1
       worker.async { [self] in

@@ -98,6 +98,106 @@ void main() {
     },
   );
 
+  test('the comic migration keeps every book and the rows that reference it', () async {
+    final directory = tempDataDirectory();
+    final path = '${directory.path}/library.sqlite3';
+    final old = await Store.open(
+      path,
+      migrations: schemaMigrations.where((m) => m.version <= 21).toList(),
+    );
+    final hash = 'a' * 64;
+    await old.transaction((db) {
+      db.execute(
+        '''INSERT INTO books (id, title, format, file_path,
+            storage_kind, original_path, content_hash, file_size, progress,
+            source_folder, protection, protection_checked)
+          VALUES (7, 'Kept', 'pdf', '/b.pdf', 'referenced', '/b.pdf', ?, 9,
+            0.5, 'Shelf', 'password', 1)''',
+        [hash],
+      );
+      db.execute(
+        "INSERT INTO library_locations (id, label) VALUES ('loc', 'Folder')",
+      );
+      db.execute(
+        "INSERT INTO book_locators (content_hash, location_id, locator_key) VALUES (?, 'loc', 'b.pdf')",
+        [hash],
+      );
+      db.execute(
+        "INSERT INTO library_source_admissions (location_id, locator_key, content_hash) VALUES ('loc', 'b.pdf', ?)",
+        [hash],
+      );
+      db.execute(
+        "INSERT INTO book_file_cache (content_hash, format, size, kept, accessed) VALUES (?, 'pdf', 9, 1, 3)",
+        [hash],
+      );
+      db.execute(
+        'INSERT INTO reading_state (content_hash, unit, zoom) VALUES (?, 2, 1)',
+        [hash],
+      );
+      // A removed book's content, which outlives its book row.
+      db.execute(
+        "INSERT INTO library_removed_contents (content_hash, size, removed_at) VALUES (?, 12, '2026-11-01T00:00:00.000Z')",
+        ['b' * 64],
+      );
+    });
+    await old.close();
+
+    final store = await Store.open(path);
+    addTearDown(store.close);
+    expect(
+      await store.read(
+        (db) => db
+            .select(
+              'SELECT content_hash, size, removed_at FROM library_removed_contents',
+            )
+            .single
+            .values,
+      ),
+      ['b' * 64, 12, '2026-11-01T00:00:00.000Z'],
+    );
+    int count(Database db, String table) =>
+        db.select('SELECT count(*) FROM $table').single.columnAt(0) as int;
+    expect(
+      await store.read(
+        (db) => [
+          ...db
+              .select(
+                'SELECT id, title, progress, source_folder, protection FROM books',
+              )
+              .single
+              .values,
+          for (final table in [
+            'book_locators',
+            'library_source_admissions',
+            'book_file_cache',
+            'reading_state',
+          ])
+            count(db, table),
+        ],
+      ),
+      [7, 'Kept', 0.5, 'Shelf', 'password', 1, 1, 1, 1],
+    );
+    // Comics are admitted, and removing a book still cascades.
+    expect(
+      await store.transaction((db) {
+        db.execute(
+          '''INSERT INTO books (title, format, file_path,
+              storage_kind, original_path, content_hash, file_size)
+            VALUES ('Comic', 'cbz', '/c.cbz', 'referenced', '/c.cbz', ?, 1)''',
+          ['c' * 64],
+        );
+        db.execute('DELETE FROM books WHERE id = 7');
+        return [
+          count(db, 'books'),
+          count(db, 'book_locators'),
+          count(db, 'library_source_admissions'),
+          count(db, 'book_file_cache'),
+        ];
+      }),
+      [1, 0, 0, 0],
+    );
+  });
+
   test('later migrations apply in order on an older database', () async {
     final directory = tempDataDirectory();
     final path = '${directory.path}/library.sqlite3';

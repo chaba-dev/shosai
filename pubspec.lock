@@ -738,6 +738,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.56.3"
+  shosai_cbz:
+    dependency: "direct main"
+    description:
+      path: "packages/shosai_cbz"
+      relative: true
+    source: path
+    version: "0.1.0"
   shosai_core:
     dependency: "direct main"
     description:

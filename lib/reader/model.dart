@@ -274,11 +274,8 @@ final class ReaderTypographyPresentation {
   /// Whether the document is reflowable (EPUB), so the EPUB controls apply.
   bool get reflowable => format == FlutterBookFormat.epub;
 
-  /// Whether the document is searchable. Every supported format (EPUB and
-  /// PDF) is; the retired CBZ format was the one that had no text.
-  bool get searchable => switch (format) {
-    FlutterBookFormat.pdf || FlutterBookFormat.epub => true,
-  };
+  /// Whether the document has text to search: EPUB and PDF, not a comic.
+  bool get searchable => format.hasText;
 
   ReaderTypographyPresentation copyWith({
     FlutterBookFormat? format,

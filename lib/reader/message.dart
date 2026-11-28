@@ -447,6 +447,8 @@ final class ReaderTypographyChanged extends ReaderMessage {
     this.animations,
     this.progress,
     this.continuous,
+    this.rightToLeft,
+    this.fromSettings = false,
   });
 
   final double? fontSize;
@@ -455,11 +457,19 @@ final class ReaderTypographyChanged extends ReaderMessage {
   final ReaderRasterFit? rasterFit;
   final double? zoom;
 
-  /// The Pages setting: two pages where they fit, or always one.
+  /// The Pages setting: two pages where they fit, or always one. For a
+  /// comic, like [continuous] and [rightToLeft], it is that comic's choice.
   final bool? twoPages;
   final bool? animations;
   final FlutterReaderProgress? progress;
   final bool? continuous;
+
+  /// A comic's reading direction.
+  final bool? rightToLeft;
+
+  /// Whether the change comes from Settings rather than this reader's own
+  /// controls: it then never becomes the open comic's own choice.
+  final bool fromSettings;
 }
 
 /// Requests the Markdown export of the current book's bookmarks (RD-08).
@@ -956,6 +966,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     this.pdfX,
     this.defaultPdfFit,
     this.pdfFitOverride,
+    this.comicChoices,
     this.toolError,
     this.returnPoints = const [],
     this.match,
@@ -977,6 +988,10 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final double? pdfX;
   final ReaderRasterFit? defaultPdfFit;
   final FlutterPdfFit? pdfFitOverride;
+
+  /// A comic's own saved direction, Pages and continuous choices; null for
+  /// every other format.
+  final ({bool? rightToLeft, bool? twoPages, bool? continuous})? comicChoices;
   final String? toolError;
 
   /// The return points the book opens with: where it was left, when it

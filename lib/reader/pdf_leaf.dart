@@ -91,7 +91,7 @@ extension on ReaderController {
     if (!renderPdfAhead ||
         pdf == null ||
         document == null ||
-        document.format != FlutterBookFormat.pdf ||
+        !document.format.fixedPages ||
         _model.contentState != ReaderContentState.ready ||
         _model.continuousPresentation ||
         _model.columnsPresentation ||
