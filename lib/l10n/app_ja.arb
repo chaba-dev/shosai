@@ -430,6 +430,7 @@
   "catalogWordCount": "{count}語",
   "catalogReleased": "公開日",
   "catalogReleasedOn": "{date}",
+  "catalogReleasedBy": "{date}（{source}）",
   "catalogMoreByAuthor": "{author}の他の作品",
   "catalogAllByAuthor": "すべて（{count}）",
   "catalogViewSource": "提供元で確認",

@@ -45,7 +45,8 @@ const optionalCatalogTables = {
 /// years before the common era are negative. `book_details` holds the source's
 /// summary as published and a rounded Flesch reading-ease score, which may fall
 /// outside 0–100, plus a plain-text long description (paragraphs separated by
-/// blank lines), a word count and the edition's release date (`YYYY-MM-DD`).
+/// blank lines), a word count and the edition's release date (`YYYY-MM-DD`)
+/// with `released_by`, the source that released it.
 /// `book_series` names each series a work belongs to and its position when
 /// known. None of them invents a value the source does not supply.
 ///
@@ -128,7 +129,8 @@ CREATE TABLE book_details (
   reading_ease INTEGER,
   description TEXT CHECK (length(trim(description)) > 0),
   word_count INTEGER CHECK (word_count > 0),
-  released TEXT CHECK (released IS NULL OR (length(released) = 10 AND date(released) IS released))
+  released TEXT CHECK (released IS NULL OR (length(released) = 10 AND date(released) IS released)),
+  released_by TEXT REFERENCES sources(id) CHECK (released_by IS NULL OR released IS NOT NULL)
 ) STRICT;
 CREATE TABLE book_series (
   book_id TEXT NOT NULL REFERENCES books(id),

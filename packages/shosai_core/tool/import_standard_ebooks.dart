@@ -494,12 +494,14 @@ Future<T> _retry<T>(Future<T> Function() attempt) async {
         write(
           '''
         INSERT INTO book_details (
-          book_id, summary, reading_ease, description, word_count, released
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          book_id, summary, reading_ease, description, word_count, released,
+          released_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (book_id) DO UPDATE SET summary = excluded.summary,
           reading_ease = excluded.reading_ease,
           description = excluded.description,
-          word_count = excluded.word_count, released = excluded.released
+          word_count = excluded.word_count, released = excluded.released,
+          released_by = excluded.released_by
         ''',
           [
             work,
@@ -508,6 +510,7 @@ Future<T> _retry<T>(Future<T> Function() attempt) async {
             book.description,
             book.wordCount,
             book.released,
+            if (book.released == null) null else _source,
           ],
         );
       }

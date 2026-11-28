@@ -1312,6 +1312,8 @@
   "catalogReleased": "Released",
   "catalogReleasedOn": "{date}",
   "@catalogReleasedOn": {"description": "A source's edition release date, never a publication date.", "placeholders": {"date": {"type": "DateTime", "format": "yMMMMd"}}},
+  "catalogReleasedBy": "{date} by {source}",
+  "@catalogReleasedBy": {"description": "A source's edition release date and the source's name, never a publication date.", "placeholders": {"date": {"type": "DateTime", "format": "yMMMMd"}, "source": {"type": "String"}}},
   "catalogMoreByAuthor": "More by {author}",
   "@catalogMoreByAuthor": {"placeholders": {"author": {"type": "String"}}},
   "catalogAllByAuthor": "All {count}",

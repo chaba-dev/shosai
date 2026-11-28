@@ -55,7 +55,8 @@ CatalogClient createCatalogFixture(
         // Project Gutenberg's published summary for ebook 1342.
         db.execute(
           'INSERT INTO book_details (book_id, summary, reading_ease, '
-          'description, word_count, released) VALUES (?, ?, ?, ?, ?, ?)',
+          'description, word_count, released, released_by) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
             id,
             '"Pride and Prejudice" by Jane Austen is a novel published in 1813. '
@@ -71,6 +72,7 @@ CatalogClient createCatalogFixture(
                 'Its wit has kept it in print for two centuries.',
             121533,
             '2022-01-01',
+            'gutenberg',
           ],
         );
         db.execute("INSERT INTO book_series VALUES (?, 'Austen novels', 2)", [

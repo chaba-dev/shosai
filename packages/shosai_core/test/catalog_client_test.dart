@@ -156,8 +156,8 @@ void main() {
       ]);
       expect((book.summary, book.readingEase), ('Courtship, at length.', 69));
       expect(
-        (book.description, book.wordCount, book.released),
-        ('A novel.\n\nOf manners.', 121533, '2022-01-01'),
+        (book.description, book.wordCount, book.released, book.releasedBy),
+        ('A novel.\n\nOf manners.', 121533, '2022-01-01', '青空文庫'),
       );
       expect(book.series, [
         (name: 'Austen novels', position: 2),
@@ -167,8 +167,8 @@ void main() {
       final cat = (await client.book('cat'))!;
       expect((cat.summary, cat.readingEase), (null, -13));
       expect(
-        (cat.description, cat.wordCount, cat.released),
-        (null, null, null),
+        (cat.description, cat.wordCount, cat.released, cat.releasedBy),
+        (null, null, null, null),
       );
       expect(cat.series, isEmpty);
       expect(cat.authors.single.name, '夏目漱石');
@@ -246,6 +246,8 @@ void main() {
         '',
       )) {
         rewrite('book_details/$part.json', (row) {
+          // Snapshots published before the release source omit it.
+          row.remove('released_by');
           if (row['book_id'] == 'cat') {
             row
               ..clear()
@@ -256,6 +258,7 @@ void main() {
       expect(await client.refresh(), CatalogRefresh.installed);
       final pride = (await client.book('pride'))!;
       expect(pride.editions.map((e) => e.sizeBytes), [null, null]);
+      expect((pride.released, pride.releasedBy), ('2022-01-01', null));
       expect(pride.editions.first.variant, 'With images');
 
       final books = File('${snapshot.path}/books/0.json');
@@ -321,15 +324,15 @@ void main() {
       // Reduce the installed index to the layout builds before #365 installed.
       final db = sqlite3.open('${root.path}/device/catalog/catalog.sqlite3');
       db.execute('''DROP TABLE book_series;
-        ALTER TABLE book_details DROP COLUMN description;
-        ALTER TABLE book_details DROP COLUMN word_count;
-        ALTER TABLE book_details DROP COLUMN released''');
+        CREATE TABLE old AS SELECT book_id, summary, reading_ease FROM book_details;
+        DROP TABLE book_details;
+        ALTER TABLE old RENAME TO book_details''');
       db.close();
       final book = (await client.book('pride'))!;
       expect((book.summary, book.readingEase), ('Courtship, at length.', 69));
       expect(
-        (book.description, book.wordCount, book.released),
-        (null, null, null),
+        (book.description, book.wordCount, book.released, book.releasedBy),
+        (null, null, null, null),
       );
       expect(book.series, isEmpty);
     },
@@ -650,8 +653,8 @@ void _fixture(Directory root, Directory snapshot) {
       INSERT INTO book_details VALUES ('pride', 'Courtship, at length.', 69,
         'A novel.
 
-Of manners.', 121533, '2022-01-01'),
-        ('cat', NULL, -13, NULL, NULL, NULL);
+Of manners.', 121533, '2022-01-01', 'aozora'),
+        ('cat', NULL, -13, NULL, NULL, NULL, NULL);
       INSERT INTO book_series VALUES ('pride', 'Austen novels', 2), ('pride', 'Classics', NULL);
       INSERT INTO subjects VALUES ('love', 'Love stories');
       INSERT INTO book_subjects VALUES ('pride', 'love');
