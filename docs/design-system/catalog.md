@@ -43,6 +43,8 @@ The catalog path was searched for repeated inline UI, near-duplicate controls, r
 
 ## Sync record
 
+2026-11-28, phone subjects over `495fdac`. Scope: P3 subject pills cap at five on phone with a **+{count} more** chip; book facts take their own line beside several authors. No new component. Both token sources remain unchanged.
+
 2026-11-28, release source over `b30d690`. Scope: P3's Released value names the releasing source when the catalog records it; no new component. Both token sources remain unchanged.
 
 2026-11-28, book details over `727b374`. Scope: P3 in `lib/shell/view_browse.dart`, localized labels and browse specimens/tests. Adds **About this book** (long description, series, length, release date) below the source actions; no new component. Both token sources remain unchanged.

@@ -1624,6 +1624,18 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String catalogMoreSubjects(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '+$countString more';
+  }
+
+  @override
+  String get catalogShowAllSubjects => 'Show all subjects';
+
+  @override
   String get catalogAboutBook => 'About this book';
 
   @override

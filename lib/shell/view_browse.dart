@@ -964,7 +964,7 @@ class _CatalogBookPage extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: ShosaiTokens.space2,
                 children: [
-                  for (final (index, author) in details.authors.indexed) ...[
+                  for (final author in details.authors) ...[
                     ShellLink(
                       label: author.name,
                       onPressed: () => browseAuthor(author),
@@ -979,16 +979,18 @@ class _CatalogBookPage extends StatelessWidget {
                               author.deathYear != null)
                             '${author.birthYear == null ? '' : year(author.birthYear!)}'
                                 '–${author.deathYear == null ? '' : year(author.deathYear!)}',
-                          if (index == details.authors.length - 1) ...bookFacts,
+                          // A sole author's line carries the book's facts.
+                          if (details.authors.length == 1) ...bookFacts,
                         ]
                         case final facts when facts.isNotEmpty)
                       Text(facts.join(' · '), style: muted),
                   ],
-                  // Book facts do not depend on an author being catalogued.
-                  if (details.authors.isEmpty && bookFacts.isNotEmpty)
-                    Text(bookFacts.join(' · '), style: muted),
                 ],
               ),
+              // With several authors, or none, the book's facts take their own
+              // line, so they never read as the last author's.
+              if (details.authors.length != 1 && bookFacts.isNotEmpty)
+                Text(bookFacts.join(' · '), style: muted),
             ],
           );
     final body = details == null
@@ -1003,14 +1005,18 @@ class _CatalogBookPage extends StatelessWidget {
                   style: shellEditorialStyle(18, 28, weight: FontWeight.w400),
                 ),
               ],
-              if (details.subjects.isNotEmpty) ...[
+              if (_subjectTags(details.subjects) case final tags
+                  when tags.isNotEmpty) ...[
                 const SizedBox(height: ShosaiTokens.space4),
                 Wrap(
                   spacing: ShosaiTokens.space2,
                   runSpacing: ShosaiTokens.space2,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    for (final (label, heading) in _subjectTags(
-                      details.subjects,
+                    for (final (label, heading) in tags.take(
+                      phone && !model.subjectsExpanded
+                          ? catalogPhoneSubjectLimit
+                          : tags.length,
                     ))
                       Semantics(
                         label: heading,
@@ -1026,6 +1032,32 @@ class _CatalogBookPage extends StatelessWidget {
                             side: BorderSide(color: palette.lineStrong),
                           ),
                         ),
+                      ),
+                    if (phone &&
+                        !model.subjectsExpanded &&
+                        tags.length > catalogPhoneSubjectLimit)
+                      ActionChip(
+                        label: Text(
+                          l10n.catalogMoreSubjects(
+                            tags.length - catalogPhoneSubjectLimit,
+                          ),
+                        ),
+                        labelStyle: shellInterfaceStyle(
+                          14,
+                          20,
+                          weight: FontWeight.w500,
+                        ).copyWith(color: palette.accent),
+                        backgroundColor: palette.surface,
+                        shape: StadiumBorder(
+                          side: BorderSide(color: palette.lineStrong),
+                        ),
+                        tooltip: l10n.catalogShowAllSubjects,
+                        // The phone layout is chosen by width, so desktop
+                        // platforms reach it too; keep its touch target.
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        visualDensity: VisualDensity.standard,
+                        onPressed: () =>
+                            dispatch(const BrowseSubjectsExpanded()),
                       ),
                   ],
                 ),
@@ -1367,7 +1399,10 @@ List<(String, String)> _subjectTags(List<String> subjects) {
   final seen = <String>{};
   return [
     for (final heading in subjects)
-      if (heading.split(' -- ').first.trim() case final label
+      // Catalogs installed before the importer normalized headings may still
+      // hold Standard Ebooks' unspaced `Courtship--Fiction`. The separator is
+      // a run's last two hyphens, keeping the date hyphen in `1890---Fiction`.
+      if (heading.split(RegExp(r'\s*--(?!-)\s*')).first.trim() case final label
           when label.isNotEmpty && seen.add(label))
         (label, heading),
   ];
