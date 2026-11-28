@@ -162,6 +162,8 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Show the typographic cover while a cover downloads (#367)
 - *(catalog)* Stop doubling subjects written without spaces (#369)
 - *(annotations)* Record the content fingerprint's algorithm and version (#372)
+- *(catalog)* Show a long title's volume on shelf cards (#375)
+- *(catalog)* Keep the Gutenberg subtitles the CSV drops (#374)
 
 ### 🚜 Refactor
 
