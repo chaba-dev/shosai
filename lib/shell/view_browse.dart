@@ -407,7 +407,7 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                   widget.layout != ShellLayout.phone &&
                   model.books.isNotEmpty)
                 SizedBox(
-                  height: 302 * MediaQuery.textScalerOf(context).scale(1),
+                  height: _CatalogShelfCard.heightOf(context),
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: model.books.length,
@@ -734,36 +734,111 @@ class _CatalogShelfCard extends StatelessWidget {
   final CatalogBook book;
   final VoidCallback onPressed;
 
+  /// The cover and gap stay 212 px; the three title lines and the author line
+  /// scale with the text.
+  static double heightOf(BuildContext context) =>
+      212 + 90 * MediaQuery.textScalerOf(context).scale(1);
+
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 136,
-    child: InkWell(
-      borderRadius: BorderRadius.circular(ShosaiTokens.radiusSm),
-      onTap: onPressed,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(height: 204, child: _CatalogCover(book: book)),
-          const SizedBox(height: ShosaiTokens.space2),
-          Text(
-            book.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: shellEditorialStyle(14, 19),
-          ),
-          Text(
-            book.authors.join(', '),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: shellInterfaceStyle(
-              12,
-              16,
-            ).copyWith(color: ShellPalette.of(context).inkMuted),
-          ),
-        ],
+  Widget build(BuildContext context) {
+    final style = shellEditorialStyle(14, 19);
+    // Three lines usually leave room for the volume that ends a title or its
+    // subtitle line, telling one book of a set from the next. A longer title
+    // keeps its volume on the last line and shortens the rest instead.
+    bool exceeds(String text, int lines) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: lines,
+      )..layout(maxWidth: 136);
+      final exceeded = painter.didExceedMaxLines;
+      painter.dispose();
+      return exceeded;
+    }
+
+    final volume = exceeds(book.title, 3)
+        ? _volumeSplit(book.title, fits: (line) => !exceeds(line, 1))
+        : null;
+    return SizedBox(
+      width: 136,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(ShosaiTokens.radiusSm),
+        onTap: onPressed,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(height: 204, child: _CatalogCover(book: book)),
+            const SizedBox(height: ShosaiTokens.space2),
+            // Assistive technology reads the whole title once.
+            if (volume case (:final head, :final tail)) ...[
+              Text(
+                head,
+                semanticsLabel: book.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+              ExcludeSemantics(
+                child: Text(
+                  tail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
+              ),
+            ] else
+              Text(
+                book.title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            Text(
+              book.authors.join(', '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: shellInterfaceStyle(
+                12,
+                16,
+              ).copyWith(color: ShellPalette.of(context).inkMuted),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
+}
+
+final _volumeMark = RegExp(
+  r'\b(?:vol|volume|part|pt|no|number|book|tome|band|teil|deel|osa)\b\.?\s*'
+  r'(?:[0-9]+|[ivxlc]+\b)',
+  caseSensitive: false,
+);
+
+/// Splits [title] at the last volume or part it names, searching its lines
+/// from the last: the text before it, and the rest of that line, such as
+/// "Volume 03", or the whole subtitle line "England, vol. 1 of 2" when it
+/// [fits] one line. Later lines are dropped. Null when the title names no
+/// volume.
+({String head, String tail})? _volumeSplit(
+  String title, {
+  required bool Function(String line) fits,
+}) {
+  final lines = title.split(RegExp(r'\r?\n'));
+  for (var i = lines.length - 1; i >= 0; i--) {
+    final mark = _volumeMark.allMatches(lines[i]).lastOrNull;
+    if (mark == null) continue;
+    // A subtitle line naming the volume stays whole, as on narrower titles.
+    final start = i > 0 && fits(lines[i].trim()) ? 0 : mark.start;
+    final head = [
+      ...lines.take(i),
+      lines[i].substring(0, start),
+    ].join('\n').replaceFirst(RegExp(r'[\s,.:;—–-]+$'), '');
+    if (head.isEmpty) return null;
+    return (head: head, tail: lines[i].substring(start).trim());
+  }
+  return null;
 }
 
 class _CatalogCover extends StatelessWidget {
@@ -1369,7 +1444,7 @@ class _CatalogBookPage extends StatelessWidget {
                 ),
                 const SizedBox(height: ShosaiTokens.space3),
                 SizedBox(
-                  height: 302 * MediaQuery.textScalerOf(context).scale(1),
+                  height: _CatalogShelfCard.heightOf(context),
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: details.moreByAuthor.length,
