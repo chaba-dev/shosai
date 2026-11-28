@@ -109,7 +109,8 @@ Future<void> _importRdf(Database db, File input) async {
     CREATE TEMP TABLE listed_details (
       ebook_id TEXT PRIMARY KEY,
       summary TEXT,
-      reading_ease INTEGER
+      reading_ease INTEGER,
+      title TEXT
     ) STRICT;
     CREATE TEMP TABLE listed_agents (
       ebook_id TEXT NOT NULL,
@@ -123,7 +124,7 @@ Future<void> _importRdf(Database db, File input) async {
     'INSERT INTO listed_epubs VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
   final insertDetails = db.prepare(
-    'INSERT INTO listed_details VALUES (?, ?, ?)',
+    'INSERT INTO listed_details VALUES (?, ?, ?, ?)',
   );
   // An agent appears once per role; its name and years do not change.
   final insertAgent = db.prepare(
@@ -298,8 +299,19 @@ Future<void> _parseRdf(
           .nonNulls
           .map((score) => double.parse(score).round())
           .firstOrNull;
-      if (summary.isNotEmpty || ease != null) {
-        sink.detail([id, summary.isEmpty ? null : summary, ease]);
+      // Only a title the CSV may have shortened, one with MARC subfields.
+      final titles = {
+        for (final element in ebook.findElements(
+          'title',
+          namespaceUri: _dcNamespace,
+        ))
+          element.innerText.trim(),
+      };
+      final title = titles.length == 1 && titles.single.contains(_subfield)
+          ? titles.single
+          : null;
+      if (summary.isNotEmpty || ease != null || title != null) {
+        sink.detail([id, summary.isEmpty ? null : summary, ease, title]);
       }
       for (final agent in ebook.findAllElements(
         'agent',
@@ -712,7 +724,7 @@ Future<({int works, int editions, int skipped})> _importRows(
         continue;
       }
       final id = field('Text#');
-      final title = field('Title');
+      var title = field('Title');
       final language = field('Language');
       if (!_number.hasMatch(id) || title.isEmpty || language.isEmpty) {
         throw FormatException(
@@ -731,6 +743,17 @@ Future<({int works, int editions, int skipped})> _importRows(
         skipped++;
         continue;
       }
+      final details = statements
+          .putIfAbsent(
+            'details',
+            () => db.prepare(
+              'SELECT summary, reading_ease, title FROM listed_details '
+              'WHERE ebook_id = ?',
+            ),
+          )
+          .select([id])
+          .firstOrNull;
+      title = _fullTitle(title, details?['title'] as String?);
       final work = '$_source:$id';
       write('INSERT INTO books (id, title) VALUES (?, ?)', [work, title]);
       var position = 0;
@@ -775,16 +798,8 @@ Future<({int works, int editions, int skipped})> _importRows(
           );
         }
       }
-      final details = statements
-          .putIfAbsent(
-            'details',
-            () => db.prepare(
-              'SELECT summary, reading_ease FROM listed_details WHERE ebook_id = ?',
-            ),
-          )
-          .select([id])
-          .firstOrNull;
-      if (details != null) {
+      if (details != null &&
+          (details['summary'] != null || details['reading_ease'] != null)) {
         write(
           'INSERT INTO book_details (book_id, summary, reading_ease) '
           'VALUES (?, ?, ?)',
@@ -865,6 +880,28 @@ Future<({int works, int editions, int skipped})> _importRows(
 }
 
 final _number = RegExp(r'^[1-9][0-9]*$');
+
+/// A MARC subfield code left in an RDF title, with the ISBD punctuation
+/// before it: "Gleanings in Europe : $b England, vol. 1 of 2".
+final _subfield = RegExp(r'[\s:;=/,]*\$[a-z]\s*');
+
+/// The CSV title drops the part after a MARC subfield code, sometimes keeping
+/// its punctuation, as in "Hetty Gray;". When [csv] is just that first part of
+/// [rdf], the full title is used, each further part on a line of its own as in
+/// Gutenberg's other multi-line titles. A CSV title that differs, often one an
+/// editor already completed, is kept.
+String _fullTitle(String csv, String? rdf) {
+  if (rdf == null) return csv;
+  final parts = [
+    for (final part in rdf.split(_subfield))
+      if (part.trim().isNotEmpty) part.trim(),
+  ];
+  String bare(String title) => title.replaceFirst(RegExp(r'[\s.:;=/,]+$'), '');
+  return parts.isNotEmpty && bare(csv) == bare(parts.first)
+      ? parts.join('\n')
+      : csv;
+}
+
 final _role = RegExp(r' \[[^\]]*\]$');
 final _readingEase = RegExp(r'^Reading ease score: (-?[0-9]+(?:\.[0-9]+)?)\b');
 

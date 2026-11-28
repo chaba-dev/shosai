@@ -168,6 +168,70 @@ ${[for (final (i, (birth, death)) in years.indexed) '''<p:ebook rdf:about="ebook
     },
   );
 
+  test('restores subtitles the CSV drops at a MARC subfield code', () async {
+    final dir = tempDataDirectory();
+    // Real records: 74936, "Hetty Gray" and the editor-completed title of
+    // "The Fur Country" in the CSV, then a title differing only in case.
+    const titles = [
+      ('Gleanings in Europe', r'Gleanings in Europe : $b England, vol. 1 of 2'),
+      ('Hetty Gray;', r"Hetty Gray; $b or, Nobody's bairn"),
+      (
+        'The Fur Country: Or, Seventy Degrees North Latitude',
+        r'The fur country : $b or, Seventy degrees north latitude',
+      ),
+      ('Plain Tales from the Hills', 'Plain tales from the hills'),
+    ];
+    final csv = File('${dir.path}/titles.csv')
+      ..writeAsStringSync(
+        'Text#,Type,Title,Language,Authors,Subjects,Bookshelves\n'
+        '${[for (final (i, (title, _)) in titles.indexed) '${i + 1},Text,"$title",en,,,'].join('\n')}\n',
+      );
+    final rdf = File('${dir.path}/titles.rdf')
+      ..writeAsStringSync('''
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:p="http://www.gutenberg.org/2009/pgterms/"
+         xmlns:d="http://purl.org/dc/terms/">
+${[for (final (i, (_, title)) in titles.indexed) '''<p:ebook rdf:about="ebooks/${i + 1}">
+  <d:title>$title</d:title>
+  <d:hasFormat><p:file rdf:about="https://www.gutenberg.org/ebooks/${i + 1}.epub3.images">
+    <d:format><rdf:Description><rdf:value>application/epub+zip</rdf:value></rdf:Description></d:format>
+  </p:file></d:hasFormat>
+</p:ebook>'''].join('\n')}
+</rdf:RDF>
+''');
+    final output = File('${dir.path}/titles.sqlite');
+    await importGutenbergFile(csv, output, rdf: rdf);
+    final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+    try {
+      const expected = [
+        'Gleanings in Europe\nEngland, vol. 1 of 2',
+        "Hetty Gray\nor, Nobody's bairn",
+        'The Fur Country: Or, Seventy Degrees North Latitude',
+        'Plain Tales from the Hills',
+      ];
+      expect(
+        db
+            .select(
+              'SELECT title FROM books ORDER BY CAST(substr(id, 11) AS INT)',
+            )
+            .map((row) => row['title']),
+        expected,
+      );
+      expect(
+        db
+            .select(
+              'SELECT title FROM editions ORDER BY CAST(substr(book_id, 11) AS INT)',
+            )
+            .map((row) => row['title']),
+        expected,
+      );
+      // A title alone gives a book no details.
+      expect(db.select('SELECT * FROM book_details'), isEmpty);
+    } finally {
+      db.close();
+    }
+  });
+
   test(
     'imports search metadata and only RDF-listed EPUBs with their sizes and rights',
     () async {
