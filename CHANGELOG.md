@@ -89,6 +89,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Publish Gutenberg summaries, reading ease and author dates (#352)
 - *(catalog)* Import Standard Ebooks with cover thumbnails (#365)
 - *(catalog)* Show book descriptions, series and release dates (#366)
+- *(catalog)* Name the source of a book's release date (#368)
 
 ### 🐛 Bug Fixes
 
