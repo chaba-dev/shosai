@@ -90,6 +90,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Import Standard Ebooks with cover thumbnails (#365)
 - *(catalog)* Show book descriptions, series and release dates (#366)
 - *(catalog)* Name the source of a book's release date (#368)
+- *(catalog)* Cap phone subject tags and give book facts their own line (#370)
 
 ### 🐛 Bug Fixes
 
@@ -159,6 +160,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Use the independent catalog endpoint (#363)
 - *(catalog)* Preserve author years across Gutenberg records (#364)
 - *(catalog)* Show the typographic cover while a cover downloads (#367)
+- *(catalog)* Stop doubling subjects written without spaces (#369)
 
 ### 🚜 Refactor
 
