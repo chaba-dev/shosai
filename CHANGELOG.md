@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-27
+## [0.1.0] - 2026-11-28
 
 ### 🚀 Features
 
@@ -88,6 +88,7 @@ All notable changes to this project will be documented in this file.
 - *(shell)* Add a text link component (#355)
 - *(catalog)* Publish Gutenberg summaries, reading ease and author dates (#352)
 - *(catalog)* Import Standard Ebooks with cover thumbnails (#365)
+- *(catalog)* Show book descriptions, series and release dates (#366)
 
 ### 🐛 Bug Fixes
 
@@ -156,6 +157,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Restore new Gutenberg releases and speed up the RDF import (#362)
 - *(catalog)* Use the independent catalog endpoint (#363)
 - *(catalog)* Preserve author years across Gutenberg records (#364)
+- *(catalog)* Show the typographic cover while a cover downloads (#367)
 
 ### 🚜 Refactor
 
