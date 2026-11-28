@@ -247,6 +247,7 @@ ${[for (final (i, (birth, death)) in years.indexed) '''<p:ebook rdf:about="ebook
           'description': null,
           'word_count': null,
           'released': null,
+          'released_by': null,
         },
         {
           'book_id': 'gutenberg:417',
@@ -255,6 +256,7 @@ ${[for (final (i, (birth, death)) in years.indexed) '''<p:ebook rdf:about="ebook
           'description': null,
           'word_count': null,
           'released': null,
+          'released_by': null,
         },
       ]);
       expect(

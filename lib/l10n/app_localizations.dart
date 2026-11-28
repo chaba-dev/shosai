@@ -2688,6 +2688,12 @@ abstract class AppLocalizations {
   /// **'{date}'**
   String catalogReleasedOn(DateTime date);
 
+  /// A source's edition release date and the source's name, never a publication date.
+  ///
+  /// In en, this message translates to:
+  /// **'{date} by {source}'**
+  String catalogReleasedBy(DateTime date, String source);
+
   /// No description provided for @catalogMoreByAuthor.
   ///
   /// In en, this message translates to:

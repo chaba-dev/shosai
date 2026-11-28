@@ -119,6 +119,7 @@ void main() {
           'description': null,
           'word_count': 121533,
           'released': '2022-01-01',
+          'released_by': 'standardebooks',
         },
       ],
     );

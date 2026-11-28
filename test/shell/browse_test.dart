@@ -757,6 +757,45 @@ void main() {
     }
   }
 
+  testWidgets('the release credit names its recorded source, not the edition', (
+    tester,
+  ) async {
+    const HarnessView(size: Size(1280, 900)).apply(tester);
+    final d = (await tester.runAsync(() => catalog.book('0')))!;
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: ShellBrowsePage(
+            layout: ShellLayout.desktop,
+            model: BrowseModel(
+              details: (
+                book: d.book,
+                editions: d.editions,
+                subjects: d.subjects,
+                authors: d.authors,
+                summary: d.summary,
+                readingEase: d.readingEase,
+                description: null,
+                wordCount: null,
+                released: '2014-05-25',
+                releasedBy: 'Standard Ebooks',
+                series: const [],
+                moreByAuthor: const [],
+              ),
+            ),
+            local: const ShellSearchModel(),
+            dispatch: (_) {},
+            onChosen: (_) {},
+          ),
+        ),
+      ),
+    );
+    // The selected edition is Project Gutenberg's.
+    expect(d.editions.first.sourceName, 'Project Gutenberg');
+    expect(find.text('May 25, 2014 by Standard Ebooks'), findsOneWidget);
+    expect(find.textContaining('by Project Gutenberg'), findsNothing);
+  });
+
   testWidgets('authorless books keep their facts; links are labelled links', (
     tester,
   ) async {
@@ -785,6 +824,7 @@ void main() {
                       description: ' \n\n\t',
                       wordCount: null,
                       released: null,
+                      releasedBy: null,
                       series: const [(name: '\t\n', position: 3)],
                       moreByAuthor: const [],
                     ),
@@ -1873,7 +1913,7 @@ void main() {
         for (final text in [
           'Austen novels, book 2',
           '121,533 words',
-          'January 1, 2022',
+          'January 1, 2022 by Project Gutenberg',
         ]) {
           expect(find.text(text), findsOneWidget);
         }
