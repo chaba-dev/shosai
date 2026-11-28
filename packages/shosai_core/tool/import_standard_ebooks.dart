@@ -647,7 +647,11 @@ _Book _parse(StandardEbook book) {
     for (final subject in dc('subject'))
       if (text(meta('authority', subject.getAttribute('id') ?? '')) == 'LCSH' &&
           subject.innerText.trim().isNotEmpty)
-        subject.innerText.trim(),
+        // Standard Ebooks writes `Courtship--Fiction`; Gutenberg writes
+        // `Courtship -- Fiction`. One form lets a joined book share subjects.
+        // The separator is the run's last two hyphens: in `1890---Fiction`
+        // the first belongs to an open-ended date.
+        subject.innerText.trim().replaceAll(RegExp(r'\s*--(?!-)\s*'), ' -- '),
   };
   final released = text(dc('date'));
   final words = int.tryParse(text(meta('schema:wordCount')) ?? '');

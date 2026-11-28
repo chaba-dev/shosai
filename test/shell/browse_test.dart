@@ -1887,10 +1887,20 @@ void main() {
       await tester.tap(find.text('Pride and Prejudice').first);
       await until(tester, () => controller.model.details != null);
       await capture(tester, 'catalog-$name-book');
-      // Two England headings collapse to one tag; the full heading is kept
-      // for screen readers.
+      // Three England headings, one in Standard Ebooks' unspaced form,
+      // collapse to one tag; the full heading is kept for screen readers.
       expect(find.text('England'), findsOneWidget);
       expect(find.text('England -- Fiction'), findsNothing);
+      expect(find.text('England--Fiction'), findsNothing);
+      // A date's own hyphen stays with the name: one Wimsey tag, not two.
+      expect(
+        find.text('Wimsey, Peter, Lord (Fictitious character), 1890-'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Wimsey, Peter, Lord (Fictitious character), 1890'),
+        findsNothing,
+      );
       expect(find.text('Love stories'), findsOneWidget);
       expect(
         find.byWidgetPredicate(

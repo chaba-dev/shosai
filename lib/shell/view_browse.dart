@@ -1367,7 +1367,10 @@ List<(String, String)> _subjectTags(List<String> subjects) {
   final seen = <String>{};
   return [
     for (final heading in subjects)
-      if (heading.split(' -- ').first.trim() case final label
+      // Catalogs installed before the importer normalized headings may still
+      // hold Standard Ebooks' unspaced `Courtship--Fiction`. The separator is
+      // a run's last two hyphens, keeping the date hyphen in `1890---Fiction`.
+      if (heading.split(RegExp(r'\s*--(?!-)\s*')).first.trim() case final label
           when label.isNotEmpty && seen.add(label))
         (label, heading),
   ];

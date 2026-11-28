@@ -65,6 +65,10 @@ void main() {
     <dc:subject id="subject-1">Picaresque literature</dc:subject>
     <meta property="authority" refines="#subject-1">LCSH</meta>
     <dc:subject id="subject-2">Not authoritative</dc:subject>
+    <dc:subject id="subject-3">Thirty Years' War, 1618-1648--Fiction</dc:subject>
+    <meta property="authority" refines="#subject-3">LCSH</meta>
+    <dc:subject id="subject-4">Wimsey, Peter, Lord (Fictitious character), 1890---Fiction</dc:subject>
+    <meta property="authority" refines="#subject-4">LCSH</meta>
     <meta property="schema:genre">Adventure</meta>
     <meta property="schema:genre">Satire</meta>
     <meta property="schema:genre">Fiction</meta>
@@ -183,7 +187,12 @@ void main() {
             work,
           ])
           .map((row) => row['subject_id']),
-      ['lcsh:Picaresque literature'],
+      [
+        'lcsh:Picaresque literature',
+        "lcsh:Thirty Years' War, 1618-1648 -- Fiction",
+        // Gutenberg's form of the same heading.
+        'lcsh:Wimsey, Peter, Lord (Fictitious character), 1890- -- Fiction',
+      ],
     );
     expect(
       db

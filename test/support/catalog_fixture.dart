@@ -28,7 +28,7 @@ CatalogClient createCatalogFixture(
       "INSERT INTO authors VALUES ('austen', 'Jane Austen', 'Austen', NULL), ('soseki', '夏目漱石', '夏目', 'なつめ')",
     );
     db.execute(
-      "INSERT INTO subjects VALUES ('love', 'Love stories'), ('england', 'England -- Fiction'), ('england-life', 'England -- Social life and customs -- 19th century -- Fiction'); INSERT INTO categories VALUES ('fiction', 'Fiction'), ('history', 'History')",
+      "INSERT INTO subjects VALUES ('love', 'Love stories'), ('england', 'England -- Fiction'), ('england-life', 'England -- Social life and customs -- 19th century -- Fiction'), ('england-se', 'England--Fiction'), ('wimsey', 'Wimsey, Peter, Lord (Fictitious character), 1890- -- Fiction'), ('wimsey-se', 'Wimsey, Peter, Lord (Fictitious character), 1890---Fiction'); INSERT INTO categories VALUES ('fiction', 'Fiction'), ('history', 'History')",
     );
     db.execute(
       "INSERT INTO author_details VALUES ('austen', 'Jane Austen', 1775, 1817)",
@@ -49,8 +49,9 @@ CatalogClient createCatalogFixture(
       db.execute("INSERT INTO book_subjects VALUES (?, 'love')", [id]);
       if (i == 0) {
         db.execute(
-          "INSERT INTO book_subjects VALUES (?, 'england'), (?, 'england-life')",
-          [id, id],
+          "INSERT INTO book_subjects VALUES (?, 'england'), (?, 'england-life'), "
+          "(?, 'england-se'), (?, 'wimsey'), (?, 'wimsey-se')",
+          [id, id, id, id, id],
         );
         // Project Gutenberg's published summary for ebook 1342.
         db.execute(
