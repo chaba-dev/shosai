@@ -2532,6 +2532,24 @@ abstract class AppLocalizations {
   /// **'Authors'**
   String get catalogAuthors;
 
+  /// No description provided for @catalogLayout.
+  ///
+  /// In en, this message translates to:
+  /// **'Free books layout'**
+  String get catalogLayout;
+
+  /// No description provided for @catalogLayoutGrid.
+  ///
+  /// In en, this message translates to:
+  /// **'Grid'**
+  String get catalogLayoutGrid;
+
+  /// No description provided for @catalogLayoutList.
+  ///
+  /// In en, this message translates to:
+  /// **'List'**
+  String get catalogLayoutList;
+
   /// No description provided for @catalogBrowse.
   ///
   /// In en, this message translates to:
