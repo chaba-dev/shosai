@@ -116,10 +116,10 @@ final class AnnotationRecords {
   ) => _store.transaction((db) => _create(db, owner, annotation));
 
   Future<BookAnnotations> list(AnnotationOwner owner) =>
-      _store.read((db) => _list(db, owner));
+      _store.read((db) => inSnapshot(db, () => _list(db, owner)));
 
   Future<NotesSummary> summary(int bookId) =>
-      _store.read((db) => _summary(db, bookId));
+      _store.read((db) => inSnapshot(db, () => _summary(db, bookId)));
 
   Future<bool> update(
     AnnotationOwner owner,
@@ -135,7 +135,9 @@ final class AnnotationRecords {
     int offset,
     int limit,
     List<int>? after,
-  ) => _store.read((db) => _libraryNotes(db, offset, limit, after));
+  ) => _store.read(
+    (db) => inSnapshot(db, () => _libraryNotes(db, offset, limit, after)),
+  );
 
   Future<bool> delete(AnnotationOwner owner, String id) =>
       _store.transaction((db) => _delete(db, owner, id));
@@ -144,7 +146,10 @@ final class AnnotationRecords {
     int bookId,
     String? cursor,
     int limit,
-  ) => _store.read((db) => _associationSources(db, bookId, cursor, limit));
+  ) => _store.read(
+    (db) =>
+        inSnapshot(db, () => _associationSources(db, bookId, cursor, limit)),
+  );
 
   Future<AssociationOutcome> associate(String sourceVersionId, int bookId) =>
       _store.transaction((db) => _associate(db, sourceVersionId, bookId));
@@ -225,6 +230,7 @@ _Version? _version(Database db, String hash) {
         [hash],
       )
       .firstOrNull;
+  if (row != null) checkFingerprints(db, [row.columnAt(1) as String]);
   return row == null
       ? null
       : (
@@ -247,8 +253,9 @@ _Version _ensureVersion(Database db, _Book book) {
   ]);
   db.execute(
     '''INSERT INTO annotation_document_versions
-         (id, document_id, format, content_hash, title)
-       VALUES (?, ?, ?, ?, ?)''',
+         (id, document_id, format, content_hash, fingerprint_algorithm,
+          fingerprint_version, title)
+       VALUES (?, ?, ?, ?, '$fingerprintAlgorithm', $fingerprintVersion, ?)''',
     [versionId, documentId, book.format, book.hash, book.title],
   );
   return (id: versionId, documentId: documentId, format: book.format);
@@ -598,9 +605,28 @@ Set<String> _editionHashes(Database db, String hash) => {
     row.columnAt(0) as String,
 };
 
-Set<String> _documentIds(Database db, String hash) {
+/// Run the reads of [body] in one SQLite snapshot, so the fingerprints
+/// [checkFingerprints] accepted are those of the rows read after it. For
+/// store reads only; a store transaction is already one snapshot.
+T inSnapshot<T>(Database db, T Function() body) {
+  db.execute('BEGIN');
+  try {
+    return body();
+  } finally {
+    if (!db.autocommit) db.execute('COMMIT');
+  }
+}
+
+/// The documents holding annotations on content [hash] or the contents its
+/// edition shares, refused by [checkFingerprints] unless [supportedOnly]
+/// leaves out those it does not read instead.
+Set<String> _documentIds(
+  Database db,
+  String hash, {
+  bool supportedOnly = false,
+}) {
   final hashes = {hash, ..._editionHashes(db, hash)};
-  return {
+  final documents = {
     for (final row in db.select(
       '''SELECT DISTINCT document_id
     FROM annotation_document_versions WHERE content_hash IN (${_marks(hashes.length)})''',
@@ -608,6 +634,46 @@ Set<String> _documentIds(Database db, String hash) {
     ))
       row.columnAt(0) as String,
   };
+  if (!supportedOnly) {
+    checkFingerprints(db, documents);
+    return documents;
+  }
+  return {
+    for (final document in documents)
+      if (db
+          .select(
+            '''SELECT 1 FROM annotation_document_versions v
+           WHERE v.document_id = ? AND NOT (${supportedFingerprint('v')})''',
+            [document],
+          )
+          .isEmpty)
+        document,
+  };
+}
+
+/// SQL that holds for a version row aliased [alias] whose content
+/// fingerprint this core reads.
+String supportedFingerprint(String alias) =>
+    "$alias.fingerprint_algorithm = '$fingerprintAlgorithm' "
+    'AND $alias.fingerprint_version = $fingerprintVersion';
+
+/// Throws [CoreErrorKind.unsupported] when a version of [documents] has a
+/// content fingerprint this core does not read. RFD 16 has every consumer
+/// reject an unknown contract version without modifying the record, so no
+/// annotation of such a document is listed, resolved, changed or deleted.
+void checkFingerprints(Database db, Iterable<String> documents) {
+  final ids = documents.toList();
+  if (ids.isEmpty) return;
+  final unsupported = db.select('''SELECT 1 FROM annotation_document_versions v
+       WHERE v.document_id IN (${_marks(ids.length)})
+         AND NOT (${supportedFingerprint('v')}) LIMIT 1''', ids);
+  if (unsupported.isNotEmpty) {
+    throw const CoreException(
+      CoreErrorKind.unsupported,
+      "The book's annotations were saved with a content fingerprint this "
+      'version of Shōsai does not read.',
+    );
+  }
 }
 
 NotesSummary _summary(Database db, int bookId) {
@@ -711,7 +777,10 @@ LibraryNotesPage _libraryNotes(
        WHERE EXISTS (
          SELECT 1 FROM annotation_document_versions dv
          JOIN annotations a ON a.version_id = dv.id
-         WHERE dv.document_id = document AND a.deleted_at IS NULL))
+         WHERE dv.document_id = document AND a.deleted_at IS NULL)
+         -- A document saved with an unknown fingerprint is not read.
+         AND NOT EXISTS (SELECT 1 FROM annotation_document_versions uv
+           WHERE uv.document_id = document AND NOT (${supportedFingerprint('uv')})))
        SELECT * FROM candidates WHERE edition_rank = 1
        ORDER BY last_read DESC, date_added DESC, id DESC
        LIMIT ? OFFSET ?''',
@@ -732,7 +801,12 @@ LibraryNotesPage _libraryNotes(
         noteEntries(
           db,
           row['document'] as String,
-          documents: _documentIds(db, row['content_hash'] as String),
+          // One unread edition member leaves out its notes, not the page's.
+          documents: _documentIds(
+            db,
+            row['content_hash'] as String,
+            supportedOnly: true,
+          ),
         ),
       ),
   ], hasMore: page.length > limit);
@@ -745,7 +819,16 @@ List<NoteEntry> noteEntries(
   Database db,
   String documentId, {
   Set<String>? documents,
-}) => [
+}) {
+  checkFingerprints(db, documents ?? {documentId});
+  return _noteEntries(db, documentId, documents);
+}
+
+List<NoteEntry> _noteEntries(
+  Database db,
+  String documentId,
+  Set<String>? documents,
+) => [
   for (final row in db.select(
     '''SELECT a.id, a.kind, a.color,
          coalesce(a.original_quote, a.normalized_exact), a.body,
@@ -795,8 +878,12 @@ bool _delete(Database db, AnnotationOwner owner, String id) {
 
 /// Versions of the book's format, outside its document, whose documents
 /// hold live annotations.
-const _sourceCandidates = '''FROM annotation_document_versions v
+final _sourceCandidates =
+    '''FROM annotation_document_versions v
   WHERE v.format = ? AND v.document_id IS NOT ?
+    AND NOT EXISTS (
+      SELECT 1 FROM annotation_document_versions uv
+      WHERE uv.document_id = v.document_id AND NOT (${supportedFingerprint('uv')}))
     AND EXISTS (
       SELECT 1 FROM annotation_document_versions dv
       JOIN annotations a ON a.version_id = dv.id
@@ -856,6 +943,7 @@ AssociationOutcome _associate(Database db, String sourceVersionId, int bookId) {
     throw const CoreException.notFound('The annotation source does not exist.');
   }
   final sourceDocument = source.columnAt(0) as String;
+  checkFingerprints(db, [sourceDocument]);
   final book = _book(db, bookId);
   if (source.columnAt(1) != book.format) {
     throw const CoreException.invalidRequest(
@@ -883,8 +971,9 @@ AssociationOutcome _associate(Database db, String sourceVersionId, int bookId) {
   _checkVersionCapacity(db, [sourceDocument], 1);
   db.execute(
     '''INSERT INTO annotation_document_versions
-         (id, document_id, format, content_hash, title, associated_from_version_id)
-       VALUES (?, ?, ?, ?, ?, ?)''',
+         (id, document_id, format, content_hash, fingerprint_algorithm,
+          fingerprint_version, title, associated_from_version_id)
+       VALUES (?, ?, ?, ?, '$fingerprintAlgorithm', $fingerprintVersion, ?, ?)''',
     [
       newUuid(),
       sourceDocument,
