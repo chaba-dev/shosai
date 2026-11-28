@@ -1624,6 +1624,46 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get catalogAboutBook => 'About this book';
+
+  @override
+  String get catalogSeries => 'Series';
+
+  @override
+  String catalogSeriesPosition(String series, int position) {
+    return '$series, book $position';
+  }
+
+  @override
+  String get catalogLength => 'Length';
+
+  @override
+  String catalogWordCount(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$countString words',
+      one: '1 word',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get catalogReleased => 'Released';
+
+  @override
+  String catalogReleasedOn(DateTime date) {
+    final intl.DateFormat dateDateFormat = intl.DateFormat.yMMMMd(localeName);
+    final String dateString = dateDateFormat.format(date);
+
+    return '$dateString';
+  }
+
+  @override
   String catalogMoreByAuthor(String author) {
     return 'More by $author';
   }

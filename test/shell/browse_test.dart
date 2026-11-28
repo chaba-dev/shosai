@@ -768,6 +768,11 @@ void main() {
                       authors: const [],
                       summary: d.summary,
                       readingEase: d.readingEase,
+                      // Blank values the schema's trim admits show nothing.
+                      description: ' \n\n\t',
+                      wordCount: null,
+                      released: null,
+                      series: const [(name: '\t\n', position: 3)],
                       moreByAuthor: const [],
                     ),
                   ),
@@ -782,6 +787,7 @@ void main() {
       ),
     );
     expect(find.text('English · Reading ease 69'), findsOneWidget);
+    expect(find.text('About this book'), findsNothing);
     final short = tester.getRect(find.byType(ShellLink).first);
     expect(short.width, greaterThanOrEqualTo(44));
     expect(short.height, greaterThanOrEqualTo(44));
@@ -1840,6 +1846,25 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Project Gutenberg · Without images'), findsNothing);
+      final about = find.text(
+        locale.languageCode == 'ja' ? 'この本について' : 'About this book',
+      );
+      await tester.ensureVisible(about);
+      await tester.pumpAndSettle();
+      await capture(tester, 'catalog-$name-about');
+      expect(
+        find.textContaining('Its wit has kept it in print'),
+        findsOneWidget,
+      );
+      if (locale.languageCode == 'en') {
+        for (final text in [
+          'Austen novels, book 2',
+          '121,533 words',
+          'January 1, 2022',
+        ]) {
+          expect(find.text(text), findsOneWidget);
+        }
+      }
       final picker = find.byKey(const ValueKey('catalog-edition-picker'));
       await tester.ensureVisible(picker);
       await tester.pumpAndSettle();

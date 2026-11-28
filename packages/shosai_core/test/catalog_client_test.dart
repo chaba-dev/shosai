@@ -155,9 +155,22 @@ void main() {
         ),
       ]);
       expect((book.summary, book.readingEase), ('Courtship, at length.', 69));
+      expect(
+        (book.description, book.wordCount, book.released),
+        ('A novel.\n\nOf manners.', 121533, '2022-01-01'),
+      );
+      expect(book.series, [
+        (name: 'Austen novels', position: 2),
+        (name: 'Classics', position: null),
+      ]);
       expect(book.moreByAuthor, isEmpty);
       final cat = (await client.book('cat'))!;
       expect((cat.summary, cat.readingEase), (null, -13));
+      expect(
+        (cat.description, cat.wordCount, cat.released),
+        (null, null, null),
+      );
+      expect(cat.series, isEmpty);
       expect(cat.authors.single.name, '夏目漱石');
       expect(cat.book.authors, ['夏目漱石']);
       expect(cat.authors.single.birthYear, isNull);
@@ -298,6 +311,27 @@ void main() {
       now = now.add(const Duration(days: 2));
       expect(await client.refresh(), CatalogRefresh.installed);
       expect((await client.book('pride'))!.summary, 'Courtship, at length.');
+    },
+  );
+
+  test(
+    'a version 2 catalog installed before descriptions and series still reads its details',
+    () async {
+      expect(await client.refresh(), CatalogRefresh.installed);
+      // Reduce the installed index to the layout builds before #365 installed.
+      final db = sqlite3.open('${root.path}/device/catalog/catalog.sqlite3');
+      db.execute('''DROP TABLE book_series;
+        ALTER TABLE book_details DROP COLUMN description;
+        ALTER TABLE book_details DROP COLUMN word_count;
+        ALTER TABLE book_details DROP COLUMN released''');
+      db.close();
+      final book = (await client.book('pride'))!;
+      expect((book.summary, book.readingEase), ('Courtship, at length.', 69));
+      expect(
+        (book.description, book.wordCount, book.released),
+        (null, null, null),
+      );
+      expect(book.series, isEmpty);
     },
   );
 
@@ -613,8 +647,12 @@ void _fixture(Directory root, Directory snapshot) {
         ('soseki', '夏目漱石', '夏目', 'なつめ');
       INSERT INTO book_authors VALUES ('pride', 'austen', 0), ('cat', 'soseki', 0);
       INSERT INTO author_details VALUES ('austen', 'Jane Austen', 1775, 1817);
-      INSERT INTO book_details (book_id, summary, reading_ease) VALUES ('pride', 'Courtship, at length.', 69),
-        ('cat', NULL, -13);
+      INSERT INTO book_details VALUES ('pride', 'Courtship, at length.', 69,
+        'A novel.
+
+Of manners.', 121533, '2022-01-01'),
+        ('cat', NULL, -13, NULL, NULL, NULL);
+      INSERT INTO book_series VALUES ('pride', 'Austen novels', 2), ('pride', 'Classics', NULL);
       INSERT INTO subjects VALUES ('love', 'Love stories');
       INSERT INTO book_subjects VALUES ('pride', 'love');
       INSERT INTO categories VALUES ('fiction', 'Fiction');

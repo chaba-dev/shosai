@@ -1526,6 +1526,40 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get catalogAboutBook => 'この本について';
+
+  @override
+  String get catalogSeries => 'シリーズ';
+
+  @override
+  String catalogSeriesPosition(String series, int position) {
+    return '$series 第$position巻';
+  }
+
+  @override
+  String get catalogLength => '分量';
+
+  @override
+  String catalogWordCount(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString語';
+  }
+
+  @override
+  String get catalogReleased => '公開日';
+
+  @override
+  String catalogReleasedOn(DateTime date) {
+    final intl.DateFormat dateDateFormat = intl.DateFormat.yMMMMd(localeName);
+    final String dateString = dateDateFormat.format(date);
+
+    return '$dateString';
+  }
+
+  @override
   String catalogMoreByAuthor(String author) {
     return '$authorの他の作品';
   }
