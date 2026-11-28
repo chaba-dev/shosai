@@ -165,6 +165,7 @@ All notable changes to this project will be documented in this file.
 - *(annotations)* Record the content fingerprint's algorithm and version (#372)
 - *(catalog)* Show a long title's volume on shelf cards (#375)
 - *(catalog)* Keep the Gutenberg subtitles the CSV drops (#374)
+- *(library)* Keep a removed book hidden by content across moves and revisions (#377)
 
 ### 🚜 Refactor
 
