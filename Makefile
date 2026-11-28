@@ -17,18 +17,20 @@
 ## package config to resolve its `package:test` imports on a fresh checkout.
 lint:
 	cd packages/shosai_epub && dart pub get
+	cd packages/shosai_cbz && dart pub get
 	cd packages/shosai_core && dart pub get
 	flutter analyze
 	cd packages/shosai_epub && dart analyze
+	cd packages/shosai_cbz && dart analyze
 	cd packages/shosai_core && dart analyze
 
 ## Format all Dart source files
 fmt:
-	dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
+	dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_cbz/lib packages/shosai_cbz/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Check Dart formatting without changing files
 check-fmt:
-	dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
+	dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_cbz/lib packages/shosai_cbz/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Regenerate the Flutter design-token module from assets/theme/tokens.json
 theme-tokens:
@@ -71,6 +73,7 @@ test:
 test-app:
 	flutter test
 	cd packages/shosai_epub && dart pub get && dart test
+	cd packages/shosai_cbz && dart pub get && dart test
 	cd packages/shosai_core && dart pub get && dart test
 	cd third_party/pdfium_dart && dart pub get && dart test
 

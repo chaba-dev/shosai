@@ -1,0 +1,19 @@
+name: shosai_cbz
+description: >-
+  Dart-owned CBZ (comic book ZIP) reading for the Shōsai reader: a bounded
+  archive index read in parts, natural page order, ComicInfo.xml metadata and
+  image sizes from their headers. Pixels are decoded by the host.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  archive: ^4.5.2
+  xml: ^7.0.1
+
+dev_dependencies:
+  image: ^4.10.1
+  lints: ^6.0.0
+  test: ^1.25.0

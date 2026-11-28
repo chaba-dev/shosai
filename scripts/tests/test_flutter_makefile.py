@@ -23,7 +23,7 @@ class FlutterMakefileTest(unittest.TestCase):
         # vendored PDFium hook's, after the app suite, so the fixture carries
         # those package directories and a `dart` stub: the real toolchain must
         # never run inside the fixture.
-        for package in ("shosai_epub", "shosai_core"):
+        for package in ("shosai_epub", "shosai_cbz", "shosai_core"):
             (self.root / "packages" / package).mkdir(parents=True)
         (self.root / "third_party" / "pdfium_dart").mkdir(parents=True)
         scripts = self.root / "scripts"
@@ -85,6 +85,8 @@ class FlutterMakefileTest(unittest.TestCase):
             [
                 f"{packages / 'shosai_epub'}|pub get",
                 f"{packages / 'shosai_epub'}|test",
+                f"{packages / 'shosai_cbz'}|pub get",
+                f"{packages / 'shosai_cbz'}|test",
                 f"{packages / 'shosai_core'}|pub get",
                 f"{packages / 'shosai_core'}|test",
                 f"{pdfium_dart}|pub get",
