@@ -706,8 +706,10 @@ final class LibraryFolders {
         _discovered = false;
       });
 
-  /// Scan metadata only. A bounded traversal follows provider directory keys,
-  /// not file paths, and never reads book bytes. Publish only complete scans:
+  /// Scan metadata. A bounded traversal follows provider directory keys, not
+  /// file paths. It reads the bytes of only a file whose size matches
+  /// content the reader removed, to keep that content hidden wherever it
+  /// moves (see [LibraryLocations.hideRemovedCopies]). Publish only complete scans:
   /// an interrupted/offline listing must not mark its unseen files missing.
   Future<List<LibrarySourceFile>> discover({
     bool refresh = false,
@@ -733,7 +735,11 @@ final class LibraryFolders {
       _catalog = await _withPreviews(_catalog);
       _catalogLoaded = true;
     }
-    if (_discovered && !refresh) return List.unmodifiable(_catalog);
+    if (_discovered && !refresh) {
+      // A removal since the last scan can hide a file listed then.
+      _catalog = List.unmodifiable(await _listed(_catalog));
+      return _catalog;
+    }
     final next = <LibrarySourceFile>[];
     final failures = <String, LocationFailure?>{};
     final scanned = _scanned;
@@ -771,7 +777,7 @@ final class LibraryFolders {
             }
             if (!entry.isDirectory &&
                 BookFormat.fromExtension(entry.name.split('.').last) != null) {
-              entries[entry.key] = entry;
+              entries[entry.key] = entry.withKnownSize();
               if (entries.length > maxDiscoveredBooks) {
                 throw const CoreException.limitExceeded(
                   'The source contains too many books.',
@@ -786,6 +792,13 @@ final class LibraryFolders {
           grant.id,
           generation,
           entries.values.toList(),
+        );
+        known.addAll(
+          await _locations.hideRemovedCopies(
+            location,
+            generation,
+            cancellation: cancellation,
+          ),
         );
         next.addAll([
           for (final entry in entries.values)
@@ -814,11 +827,31 @@ final class LibraryFolders {
       }
     }
     cancellation.throwIfCancelled();
-    _catalog = List.unmodifiable(await _withPreviews(next));
+    _catalog = List.unmodifiable(await _withPreviews(await _listed(next)));
     _scanFailures = Map.unmodifiable(failures);
     _discovered = true;
     return _catalog;
   });
+
+  /// The files among [files] still offered in the stored catalog, at the size
+  /// and revision they were listed with: hidden files, and ones that may be
+  /// removed content not yet read, are left out.
+  Future<List<LibrarySourceFile>> _listed(List<LibrarySourceFile> files) async {
+    final offered = {
+      for (final file in await _locations.catalog())
+        (file.locationId, file.entry.key, file.entry.size, file.entry.revision),
+    };
+    return [
+      for (final file in files)
+        if (offered.contains((
+          file.locationId,
+          file.entry.key,
+          file.entry.size,
+          file.entry.revision,
+        )))
+          file,
+    ];
+  }
 
   /// [files] with the previews stored for them.
   Future<List<LibrarySourceFile>> _withPreviews(
@@ -982,6 +1015,8 @@ final class LibraryFolders {
                 size: entry.size,
                 revision: entry.revision,
                 folderName: entry.folderName ?? directory.name,
+                sha256: entry.sha256,
+                dropboxContentHash: entry.dropboxContentHash,
               ),
               depth: directory.depth,
             ),
@@ -1105,10 +1140,10 @@ final class LibraryFolders {
     final location = await _provider(grant.provider).open(grant);
     final generation = _generations[id]!;
     Future<void> verifySource() async {
-      final current = await location.stat(
+      final current = (await location.stat(
         entry.key,
         cancellation: cancellation,
-      );
+      )).withKnownSize();
       if (current.isDirectory ||
           current.name != entry.name ||
           current.size != entry.size ||

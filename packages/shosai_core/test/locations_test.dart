@@ -5,6 +5,7 @@ import 'package:shosai_core/shosai_core.dart';
 import 'package:test/test.dart';
 
 import 'support/library_fixtures.dart';
+import 'support/temp_store.dart';
 
 void main() {
   test(
@@ -616,13 +617,511 @@ void main() {
       expect((await locations.catalog()).single.entry.key, spare.key);
     },
   );
+
+  test('a removed book stays hidden by content wherever it moves', () async {
+    final t = await TempLibrary.create();
+    final path = t.copyFixture('sample.epub', 'book.epub');
+    final bytes = File(path).readAsBytesSync();
+    final book = await t.importBook(path);
+    final locations = LibraryLocations(t.store);
+    final location = _Location();
+    final generation = await locations.connect('remote', 'Remote books');
+    final original = location.file('books/book.epub', 'r1', bytes.length);
+    await locations.admit('remote', generation, original, book.contentHash);
+    await Annotations(t.store).createNote(
+      book.id,
+      const BookAnchor(),
+      'Keep this note across a removal.',
+    );
+    expect((await t.library.remove(book.id)).removed, true);
+
+    // The same bytes moved, rewritten in place under a new revision, listed
+    // without a size, and listed by a provider that reports their digest.
+    final moved = location.file('archive/book.epub', 'r1', bytes.length);
+    final touched = location.file('books/book.epub', 'r2', bytes.length);
+    final unsized = location.file('elsewhere/book.epub', 'n1', null);
+    final digested = location.file(
+      'drive/book.epub',
+      'd1',
+      bytes.length,
+      sha: book.contentHash.toUpperCase(),
+    );
+    // Other bytes of the same size, one unreadable now, and another size.
+    final other = location.file('books/other.epub', 'o1', bytes.length);
+    final unreadable = location.file('books/offline.epub', 'u1', bytes.length);
+    final larger = location.file('books/larger.epub', 'l1', bytes.length + 1);
+    location.contents
+      ..[moved.key] = bytes
+      ..[touched.key] = bytes
+      ..[unsized.key] = bytes
+      ..[other.key] = [...bytes.take(bytes.length - 1), bytes.last ^ 1]
+      ..[larger.key] = [...bytes, 0];
+    location.failures[unreadable.key] = LocationFailure.offline;
+    final listing = [
+      moved,
+      touched,
+      unsized,
+      digested,
+      other,
+      unreadable,
+      larger,
+    ];
+
+    expect(await locations.scan('remote', generation, listing), {digested.key});
+    // Files that may be the removed content are not offered before they are
+    // read.
+    expect(
+      (await locations.catalog()).map((file) => file.entry.key),
+      unorderedEquals([larger.key]),
+    );
+    expect(await locations.hideRemovedCopies(location, generation), {
+      moved.key,
+      touched.key,
+      unsized.key,
+      unreadable.key,
+    });
+    expect(
+      location.reads,
+      unorderedEquals([
+        moved.key,
+        touched.key,
+        unsized.key,
+        other.key,
+        unreadable.key,
+      ]),
+    );
+    expect(
+      (await locations.catalog()).map((file) => file.entry.key),
+      unorderedEquals([other.key, larger.key]),
+    );
+    expect(
+      {
+        for (final hidden in await locations.hidden())
+          hidden.entry.key: hidden.contentHash,
+      },
+      {
+        moved.key: book.contentHash,
+        touched.key: book.contentHash,
+        unsized.key: book.contentHash,
+        digested.key: book.contentHash,
+      },
+    );
+
+    // The next scan reads only what it could not read before.
+    location
+      ..reads.clear()
+      ..failures.clear()
+      ..contents[unreadable.key] = bytes;
+    expect(await locations.scan('remote', generation, listing), {
+      moved.key,
+      touched.key,
+      unsized.key,
+      digested.key,
+    });
+    expect(await locations.hideRemovedCopies(location, generation), {
+      unreadable.key,
+    });
+    expect(location.reads, [unreadable.key]);
+
+    // A digest the provider reports now outranks the one read before.
+    final reported = location.file(
+      other.key,
+      other.revision!,
+      bytes.length,
+      sha: book.contentHash,
+    );
+    final relisted = [...listing.where((e) => e != other), reported];
+    expect(
+      await locations.scan('remote', generation, relisted),
+      contains(other.key),
+    );
+    expect((await locations.catalog()).map((file) => file.entry.key), [
+      larger.key,
+    ]);
+
+    // Added again, the content brings its notes back and is no longer
+    // removed: a new copy is offered without being read.
+    final again = await t.importBook(
+      t.copyFixture('sample.epub', 'again.epub'),
+    );
+    expect(again.contentHash, book.contentHash);
+    expect(
+      (await Annotations(t.store).summary(again.id)).latest,
+      'Keep this note across a removal.',
+    );
+    final copy = location.file('books/copy.epub', 'c1', bytes.length);
+    location.reads.clear();
+    await locations.scan('remote', generation, [...relisted, copy]);
+    expect(await locations.hideRemovedCopies(location, generation), isEmpty);
+    expect(location.reads, isEmpty);
+    expect(
+      (await locations.catalog()).map((file) => file.entry.key),
+      contains(copy.key),
+    );
+  });
+
+  test(
+    'removed content replacing an admitted file retires that admission',
+    () async {
+      final t = await TempLibrary.create();
+      final kept = await t.importBook(t.copyFixture('sample.epub', 'a.epub'));
+      final pdf = t.copyFixture('sample.pdf', 'b.pdf');
+      final pdfBytes = File(pdf).readAsBytesSync();
+      final removed = await t.importBook(pdf);
+      final locations = LibraryLocations(t.store);
+      final location = _Location();
+      final generation = await locations.connect('remote', 'Remote books');
+      final first = location.file('shelf/book', 'r1', kept.fileSize);
+      await locations.admit('remote', generation, first, kept.contentHash);
+      await locations.locate(kept.contentHash, (
+        locationId: 'remote',
+        key: first.key,
+      ), generation: generation);
+      await t.library.remove(removed.id);
+
+      // The removed book's bytes now sit where the kept one was admitted.
+      final replaced = location.file(first.key, 'r2', pdfBytes.length);
+      location.contents[replaced.key] = pdfBytes;
+      await locations.scan('remote', generation, [replaced]);
+      expect(await locations.hideRemovedCopies(location, generation), {
+        replaced.key,
+      });
+      expect(
+        (await locations.hidden()).single.contentHash,
+        removed.contentHash,
+      );
+      // The kept book stays, missing at that key, and the file is not read
+      // again while it is unchanged.
+      expect(
+        (await locations.copies(kept.contentHash)).single.failure,
+        LocationFailure.missing,
+      );
+      expect((await t.library.get(kept.id))!.title, kept.title);
+      location.reads.clear();
+      expect(await locations.scan('remote', generation, [replaced]), {
+        replaced.key,
+      });
+      expect(await locations.hideRemovedCopies(location, generation), isEmpty);
+      expect(location.reads, isEmpty);
+    },
+  );
+
+  test('unhiding offers one file and keeps its other copies hidden', () async {
+    final t = await TempLibrary.create();
+    final path = t.copyFixture('sample.epub', 'book.epub');
+    final bytes = File(path).readAsBytesSync();
+    final book = await t.importBook(path);
+    final locations = LibraryLocations(t.store);
+    final location = _Location();
+    final generation = await locations.connect('remote', 'Remote books');
+    await t.library.remove(book.id);
+    final first = location.file('a.epub', 'a1', bytes.length);
+    final second = location.file('b.epub', 'b1', bytes.length);
+    location.contents
+      ..[first.key] = bytes
+      ..[second.key] = bytes;
+    Future<List<String>> offered(List<LocationEntry> listing) async {
+      await locations.scan('remote', generation, listing);
+      await locations.hideRemovedCopies(location, generation);
+      return [for (final file in await locations.catalog()) file.entry.key];
+    }
+
+    expect(await offered([first, second]), isEmpty);
+    await locations.unhide((locationId: 'remote', key: first.key));
+    expect(await offered([first, second]), [first.key]);
+    expect((await locations.hidden()).single.entry.key, second.key);
+    // Moved, the unhidden file is a copy like any other.
+    final moved = location.file('c.epub', 'c1', bytes.length);
+    location.contents[moved.key] = bytes;
+    expect(await offered([moved, second]), isEmpty);
+  });
+
+  test('reading removed copies stops once the connection goes', () async {
+    final t = await TempLibrary.create();
+    final path = t.copyFixture('sample.epub', 'book.epub');
+    final bytes = File(path).readAsBytesSync();
+    final book = await t.importBook(path);
+    final locations = LibraryLocations(t.store);
+    final location = _Location();
+    final generation = await locations.connect('remote', 'Remote books');
+    await t.library.remove(book.id);
+    final first = location.file('a.epub', 'a1', bytes.length);
+    final second = location.file('b.epub', 'b1', bytes.length);
+    location.contents
+      ..[first.key] = bytes
+      ..[second.key] = bytes;
+    await locations.scan('remote', generation, [first, second]);
+    // The first file goes while it is read, so it fails to verify.
+    location.stats.remove(first.key);
+    location
+      ..gate = Completer<void>()
+      ..started = Completer<void>();
+    final reading = locations.hideRemovedCopies(location, generation);
+    await location.started!.future;
+    await locations.remove('remote');
+    location.gate!.complete();
+    await expectLater(
+      reading,
+      throwsA(
+        isA<LocationException>().having(
+          (error) => error.failure,
+          'failure',
+          LocationFailure.revoked,
+        ),
+      ),
+    );
+    expect(location.reads, [first.key]);
+  });
+
+  test('a revisionless hidden copy is read again, not trusted', () async {
+    final t = await TempLibrary.create();
+    final path = t.copyFixture('sample.epub', 'book.epub');
+    final bytes = File(path).readAsBytesSync();
+    final book = await t.importBook(path);
+    final locations = LibraryLocations(t.store);
+    final location = _Location();
+    final generation = await locations.connect('remote', 'Remote books');
+    await t.library.remove(book.id);
+    final copy = LocationEntry(
+      key: 'copy.epub',
+      name: 'copy.epub',
+      isDirectory: false,
+      size: bytes.length,
+    );
+    location.stats[copy.key] = copy;
+    location.contents[copy.key] = bytes;
+    Future<List<String>> offered() async {
+      await locations.scan('remote', generation, [copy]);
+      await locations.hideRemovedCopies(location, generation);
+      return [for (final file in await locations.catalog()) file.entry.key];
+    }
+
+    expect(await offered(), isEmpty);
+    expect((await locations.hidden()).single.entry.key, copy.key);
+    // Other bytes of the same length at the same key, still without a
+    // revision, are offered once read.
+    location.contents[copy.key] = [
+      ...bytes.take(bytes.length - 1),
+      bytes.last ^ 1,
+    ];
+    expect(await offered(), [copy.key]);
+    expect(await locations.hidden(), isEmpty);
+  });
+
+  test(
+    'a file unhidden before a re-add is hidden by the next removal',
+    () async {
+      final t = await TempLibrary.create();
+      final path = t.copyFixture('sample.epub', 'book.epub');
+      final bytes = File(path).readAsBytesSync();
+      final book = await t.importBook(path);
+      final locations = LibraryLocations(t.store);
+      final location = _Location();
+      final generation = await locations.connect('remote', 'Remote books');
+      final copy = location.file('copy.epub', 'c1', bytes.length);
+      location.contents[copy.key] = bytes;
+      await t.library.remove(book.id);
+      await locations.scan('remote', generation, [copy]);
+      await locations.hideRemovedCopies(location, generation);
+      expect(await locations.catalog(), isEmpty);
+
+      // Added again from a local file, the folder copy is still hidden; the
+      // reader unhides it, then removes the book once more.
+      final again = await t.importBook(
+        t.copyFixture('sample.epub', 'again.epub'),
+      );
+      await locations.unhide((locationId: 'remote', key: copy.key));
+      await t.library.remove(again.id);
+      await locations.scan('remote', generation, [copy]);
+      await locations.hideRemovedCopies(location, generation);
+      expect(await locations.catalog(), isEmpty);
+      expect((await locations.hidden()).single.entry.key, copy.key);
+    },
+  );
+
+  test(
+    'a hidden file taken over from a removed connection retires the admission at its key',
+    () async {
+      final t = await TempLibrary.create();
+      final kept = await t.importBook(t.copyFixture('sample.epub', 'a.epub'));
+      final removed = await t.importBook(t.copyFixture('sample.pdf', 'b.pdf'));
+      final locations = LibraryLocations(t.store);
+      final old = await locations.connect('old', 'Old drive');
+      final removedFile = LocationEntry(
+        key: 'shelf/book',
+        name: 'book',
+        isDirectory: false,
+        size: removed.fileSize,
+        revision: 'r9',
+      );
+      await locations.admit('old', old, removedFile, removed.contentHash);
+      await t.library.remove(removed.id);
+      await locations.remove('old');
+
+      final current = await locations.connect('new', 'New drive');
+      final keptFile = LocationEntry(
+        key: removedFile.key,
+        name: 'book',
+        isDirectory: false,
+        size: kept.fileSize,
+        revision: 'r1',
+      );
+      await locations.admit('new', current, keptFile, kept.contentHash);
+      await locations.locate(kept.contentHash, (
+        locationId: 'new',
+        key: keptFile.key,
+      ), generation: current);
+
+      // The file at that key is now the removed connection's hidden one.
+      expect(await locations.scan('new', current, [removedFile]), {
+        removedFile.key,
+      });
+      final hidden = (await locations.hidden()).single;
+      expect(hidden.locationId, 'new');
+      expect(hidden.contentHash, removed.contentHash);
+      expect(
+        (await locations.copies(kept.contentHash)).single.failure,
+        LocationFailure.missing,
+      );
+      // No admission names the kept book at that key any more.
+      expect(await locations.scan('new', current, [keptFile]), isEmpty);
+    },
+  );
+
+  test(
+    'a file unhidden here is not taken over hidden from a removed connection',
+    () async {
+      final t = await TempLibrary.create();
+      final book = await t.importBook(
+        t.copyFixture('sample.epub', 'book.epub'),
+      );
+      final locations = LibraryLocations(t.store);
+      final first = await locations.connect('first', 'First');
+      final second = await locations.connect('second', 'Second');
+      final copy = LocationEntry(
+        key: 'a',
+        name: 'a.epub',
+        isDirectory: false,
+        size: book.fileSize,
+        revision: 'r1',
+        sha256: book.contentHash,
+      );
+      await t.library.remove(book.id);
+      expect(await locations.scan('first', first, [copy]), {copy.key});
+      expect(await locations.scan('second', second, [copy]), {copy.key});
+      await locations.unhide((locationId: 'first', key: copy.key));
+      await locations.remove('second');
+
+      expect(await locations.scan('first', first, [copy]), isEmpty);
+      expect(
+        [for (final file in await locations.catalog()) file.locationId],
+        ['first'],
+      );
+      // The removed connection keeps its own hidden record.
+      expect(
+        await t.store.read(
+          (db) => db
+              .select('SELECT location_id FROM library_hidden_source_files')
+              .map((row) => row.columnAt(0))
+              .toList(),
+        ),
+        ['second'],
+      );
+    },
+  );
+
+  test('a listed negative size is an unknown size', () async {
+    final t = await TempLibrary.create();
+    final path = t.copyFixture('sample.epub', 'book.epub');
+    final bytes = File(path).readAsBytesSync();
+    final book = await t.importBook(path);
+    final locations = LibraryLocations(t.store);
+    final location = _Location();
+    final generation = await locations.connect('remote', 'Remote books');
+    await t.library.remove(book.id);
+    final copy = location.file('copy.epub', 'c1', -1);
+    location.contents[copy.key] = bytes;
+    await locations.scan('remote', generation, [copy]);
+    expect(await locations.catalog(), isEmpty);
+    expect(await locations.hideRemovedCopies(location, generation), {copy.key});
+    expect((await locations.hidden()).single.entry.key, copy.key);
+  });
+
+  test(
+    'removed contents carry over every hidden file of an older store',
+    () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      final before = await Store.open(
+        path,
+        migrations: schemaMigrations.where((m) => m.version <= 20).toList(),
+      );
+      final kept = 'd' * 64;
+      await before.transaction((db) {
+        db.execute(
+          "INSERT INTO library_locations (id, label) VALUES ('l', 'L')",
+        );
+        db.execute(
+          'INSERT INTO books (title, format, file_path, storage_kind, '
+          'original_path, content_hash, file_size) '
+          "VALUES ('Kept', 'epub', '/kept.epub', 'referenced', '/kept.epub', ?, 5)",
+          [kept],
+        );
+        for (final (key, hash, size) in [
+          ('unsized', 'a' * 64, null),
+          ('invalid', 'b' * 64, -1),
+          ('sized', 'c' * 64, 10),
+          ('sized-again', 'c' * 64, 10),
+          ('conflicting', 'e' * 64, 100),
+          ('conflicting-again', 'e' * 64, 101),
+          ('conflicting-invalid', 'e' * 64, -1),
+          ('kept', kept, 5),
+        ]) {
+          db.execute(
+            'INSERT INTO library_hidden_source_files '
+            '(location_id, locator_key, content_hash, size, revision) '
+            "VALUES ('l', ?, ?, ?, 'r')",
+            [key, hash, size],
+          );
+        }
+      });
+      await before.close();
+
+      final store = await Store.open(path);
+      addTearDown(store.close);
+      expect(
+        await store.read(
+          (db) => {
+            for (final row in db.select(
+              'SELECT content_hash, size FROM library_removed_contents',
+            ))
+              row.columnAt(0) as String: row.columnAt(1) as int?,
+          },
+        ),
+        {'a' * 64: null, 'b' * 64: null, 'c' * 64: 10, 'e' * 64: null},
+      );
+    },
+  );
 }
 
 final class _Location implements LibraryLocation {
   LocationFailure? failure;
   final contents = <String, List<int>>{};
   final failures = <String, LocationFailure>{};
+  final reads = <String>[];
+  final stats = <String, LocationEntry>{};
   Completer<void>? gate;
+
+  /// A listed file, which [stat] reports as listed.
+  LocationEntry file(String key, String revision, int? size, {String? sha}) =>
+      stats[key] = LocationEntry(
+        key: key,
+        name: key.split('/').last,
+        isDirectory: false,
+        size: size,
+        revision: revision,
+        sha256: sha,
+      );
   Completer<void>? started;
 
   @override
@@ -635,6 +1134,7 @@ final class _Location implements LibraryLocation {
     int? end,
     CancellationToken? cancellation,
   }) async* {
+    reads.add(key);
     if (failures[key] ?? failure case final failure?) {
       throw LocationException(failure);
     }
@@ -652,8 +1152,11 @@ final class _Location implements LibraryLocation {
   }) => throw UnimplementedError();
 
   @override
-  Future<LocationEntry> stat(String key, {CancellationToken? cancellation}) =>
-      throw UnimplementedError();
+  Future<LocationEntry> stat(
+    String key, {
+    CancellationToken? cancellation,
+  }) async =>
+      stats[key] ?? (throw const LocationException(LocationFailure.missing));
 
   @override
   Future<LocationEntry> write(

@@ -527,6 +527,50 @@ ALTER TABLE annotation_document_versions ADD COLUMN fingerprint_algorithm TEXT
 ALTER TABLE annotation_document_versions ADD COLUMN fingerprint_version INTEGER
     NOT NULL DEFAULT 1 CHECK (fingerprint_version = 1);
 '''),
+  Migration(21, 'removed contents', '''
+-- Content the reader removed from the library. A removal sticks by content
+-- (RFD 12, outcome 6): a source file with these bytes, at any key or
+-- revision and in any connection, stays off the shelf as a hidden file. A
+-- listed file that may be this content is offered only once its bytes are
+-- read and differ; the size, when known, only narrows which files are read.
+-- No foreign key to books: the row outlives the book. Cleared when the
+-- content is in the library again.
+CREATE TABLE library_removed_contents (
+    content_hash TEXT PRIMARY KEY NOT NULL
+                 CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    size         INTEGER CHECK (size IS NULL OR size >= 0),
+    removed_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+) STRICT;
+CREATE INDEX library_removed_contents_size_idx ON library_removed_contents(size);
+-- Hidden files name content removed before this record existed. Their listed
+-- size is the content's size when every valid size reported for it agrees;
+-- otherwise it is unknown.
+INSERT INTO library_removed_contents (content_hash, size, removed_at)
+SELECT content_hash,
+       CASE WHEN count(DISTINCT CASE WHEN size >= 0 THEN size END) = 1
+            THEN max(CASE WHEN size >= 0 THEN size END) END,
+       min(hidden_at)
+FROM library_hidden_source_files h
+WHERE NOT EXISTS (SELECT 1 FROM books b WHERE b.content_hash = h.content_hash)
+GROUP BY content_hash;
+-- A hidden file the reader offered again. It alone is offered at this key
+-- while its bytes are this content; other copies stay hidden. Cleared when
+-- the content is in the library again or the key is no longer listed.
+CREATE TABLE library_unhidden_source_files (
+    location_id  TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key  TEXT NOT NULL,
+    content_hash TEXT NOT NULL
+                 CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    PRIMARY KEY (location_id, locator_key)
+) STRICT;
+CREATE INDEX library_unhidden_source_files_content_idx
+    ON library_unhidden_source_files(content_hash);
+-- The content hash of a listed file's bytes, once read or reported by its
+-- provider at its listed size and revision; null until then.
+ALTER TABLE library_source_files ADD COLUMN content_hash TEXT
+    CHECK (content_hash IS NULL OR
+           (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'));
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

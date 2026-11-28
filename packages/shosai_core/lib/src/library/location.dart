@@ -53,6 +53,21 @@ final class LocationEntry {
 
   /// Unsupported provider objects still occupy names when saving new books.
   final bool readable;
+
+  /// This entry with a negative [size], which no file has, as unknown.
+  LocationEntry withKnownSize() => size == null || size! >= 0
+      ? this
+      : LocationEntry(
+          key: key,
+          name: name,
+          isDirectory: isDirectory,
+          revision: revision,
+          folderName: folderName,
+          sha256: sha256,
+          dropboxContentHash: dropboxContentHash,
+          createdAt: createdAt,
+          readable: readable,
+        );
 }
 
 /// One bounded, nonrecursive directory listing.

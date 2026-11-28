@@ -1318,6 +1318,17 @@ void main() {
       expect(await folders.discover(refresh: true), isEmpty);
       expect((await locations.hidden()).single.entry.name, 'book.epub');
 
+      // The removal follows the content: rewritten in place under a new
+      // modification time, or moved, the file still stays off the shelf.
+      file.setLastModifiedSync(DateTime(2001));
+      expect(await folders.discover(refresh: true), isEmpty);
+      final moved = file.renameSync('${source.path}/moved.epub');
+      expect(await folders.discover(refresh: true), isEmpty);
+      expect((await locations.hidden()).single.entry.name, 'moved.epub');
+      moved.renameSync(file.path);
+      expect(await folders.discover(refresh: true), isEmpty);
+      expect((await locations.hidden()).single.entry.name, 'book.epub');
+
       // Unhiding offers it again, and opening it brings the book back.
       await locations.unhide((
         locationId: 'src',
@@ -1337,6 +1348,70 @@ void main() {
         'book.epub',
       ]);
       expect(await locations.hidden(), isEmpty);
+    },
+  );
+
+  test(
+    'a removed book leaves a listed copy off the shelf without reading it',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-remove-listed',
+      );
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      addTearDown(() async {
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      final library = Library(
+        store,
+        managedDirectory: '${directory.path}/books',
+        inspectors: {BookFormat.epub: const EpubInspector()},
+      );
+      final book = (await library.importFile(
+        File(
+          'packages/shosai_core/test/fixtures/sample.epub',
+        ).copySync('${directory.path}/book.epub').path,
+        managed: false,
+      )).book!;
+      final locations = LibraryLocations(store);
+      final provider = _FixtureProvider(directory.path);
+      // A listing-only provider that reports each file's SHA-256, as Google
+      // Drive does: it fails any read.
+      provider.locations['drive'] = _PagedLocation('drive')
+        ..pages[null] = [
+          LocationPage([
+            LocationEntry(
+              key: 'copy',
+              name: 'copy.epub',
+              isDirectory: false,
+              size: book.fileSize,
+              revision: '1',
+              sha256: book.contentHash,
+            ),
+          ]),
+        ];
+      final folders = LibraryFolders(
+        Preferences(store),
+        library,
+        locations,
+        () async => '${directory.path}/staged.epub',
+        BookFileCache(store, '${directory.path}/cache'),
+        providers: [provider],
+      );
+      addTearDown(folders.close);
+      await folders.add(
+        LibraryConnection('drive', 'Drive', 'fixture', {
+          'root': directory.path,
+        }),
+      );
+      expect((await folders.discover()).single.entry.key, 'copy');
+
+      expect((await library.remove(book.id)).removed, true);
+      // The listing from before the removal no longer offers the copy, and
+      // a fresh one hides it by its reported digest.
+      expect(await folders.discover(), isEmpty);
+      expect(await folders.discover(refresh: true), isEmpty);
+      expect((await locations.hidden()).single.entry.key, 'copy');
     },
   );
 

@@ -572,6 +572,13 @@ Book _insertBook(
     ],
   );
   final book = _bookById(db, db.lastInsertRowId)!;
+  // The content is in the library again; its files are no longer removed.
+  for (final table in [
+    'library_removed_contents',
+    'library_unhidden_source_files',
+  ]) {
+    db.execute('DELETE FROM $table WHERE content_hash = ?', [fingerprint.hash]);
+  }
   adoptPendingBookmarkNotes(
     db,
     hash: fingerprint.hash,
@@ -597,11 +604,108 @@ Book? _removeBook(Database db, int id) {
          hidden_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')''',
     [book.contentHash],
   );
+  // The removal sticks by content: a copy listed at another key or revision
+  // stays off the shelf too (see LibraryLocations.scan).
+  db.execute(
+    '''INSERT INTO library_removed_contents (content_hash, size)
+       SELECT content_hash, file_size FROM books WHERE id = ?
+       ON CONFLICT(content_hash) DO UPDATE SET size = excluded.size,
+         removed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')''',
+    [id],
+  );
   db.execute('DELETE FROM books WHERE id = ?', [id]);
+  // A file unhidden at an earlier removal is not an exception to this one.
+  db.execute(
+    'DELETE FROM library_unhidden_source_files WHERE content_hash = ?',
+    [book.contentHash],
+  );
+  hideRemovedSourceFiles(db);
   // The copy's directory as recorded at import (its canonical path then),
   // never a fresh resolution of the configured directory.
   if (book.managed) _recordDeletionDebt(db, book.path, p.dirname(book.path));
   return book;
+}
+
+/// Move the listed source files whose read bytes are removed content to the
+/// hidden files, in connection [locationId] or in every connection, and
+/// return their keys. A file the reader unhid at its key is left offered.
+/// Their files are untouched.
+Set<String> hideRemovedSourceFiles(Database db, {String? locationId}) {
+  final rows = db.select(
+    '''SELECT f.location_id, f.locator_key, f.content_hash, f.size, f.revision
+       FROM library_source_files f
+       JOIN library_removed_contents r ON r.content_hash = f.content_hash
+       WHERE ${locationId == null ? '1' : 'f.location_id = ?'}
+         AND NOT EXISTS (SELECT 1 FROM library_unhidden_source_files u
+           WHERE u.location_id = f.location_id AND u.locator_key = f.locator_key
+             AND u.content_hash = f.content_hash)''',
+    [?locationId],
+  );
+  for (final row in rows) {
+    hideSourceFile(
+      db,
+      row.columnAt(0) as String,
+      row.columnAt(1) as String,
+      row.columnAt(2) as String,
+      row.columnAt(3) as int?,
+      row.columnAt(4) as String?,
+    );
+  }
+  return {for (final row in rows) row.columnAt(1) as String};
+}
+
+/// Whether the file listed at [key] in [locationId], read as [hash], is
+/// removed content the reader has not unhid there.
+bool isRemovedSourceFile(
+  Database db,
+  String locationId,
+  String key,
+  String hash,
+) => db
+    .select(
+      '''SELECT 1 FROM library_removed_contents r WHERE r.content_hash = ?1
+     AND NOT EXISTS (SELECT 1 FROM library_unhidden_source_files u
+       WHERE u.location_id = ?2 AND u.locator_key = ?3 AND u.content_hash = ?1)''',
+      [hash, locationId, key],
+    )
+    .isNotEmpty;
+
+/// Hide the file listed at [key] in [locationId] as content [hash]. Its key
+/// no longer holds what an earlier admission there named: that admission
+/// goes, and the earlier book, with its notes, is missing at this key.
+void hideSourceFile(
+  Database db,
+  String locationId,
+  String key,
+  String hash,
+  int? size,
+  String? revision,
+) {
+  db.execute(
+    '''INSERT INTO library_hidden_source_files
+         (location_id, locator_key, content_hash, size, revision)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(location_id, locator_key) DO UPDATE SET
+         content_hash = excluded.content_hash, size = excluded.size,
+         revision = excluded.revision,
+         hidden_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')''',
+    [locationId, key, hash, size, revision],
+  );
+  for (final table in [
+    'library_source_files',
+    'library_source_previews',
+    'library_source_admissions',
+  ]) {
+    db.execute('DELETE FROM $table WHERE location_id = ? AND locator_key = ?', [
+      locationId,
+      key,
+    ]);
+  }
+  db.execute(
+    '''UPDATE book_locators SET failure = 'missing'
+       WHERE location_id = ? AND locator_key = ? AND content_hash != ?''',
+    [locationId, key, hash],
+  );
 }
 
 void _recordDeletionDebt(Database db, String path, String managedDirectory) {
