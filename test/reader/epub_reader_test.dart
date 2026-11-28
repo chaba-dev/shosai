@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -503,6 +504,110 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await _drainHarness(tester);
     semantics.dispose();
+  });
+
+  testWidgets('a touch selection end handle drags across the real page', (
+    tester,
+  ) async {
+    final harness = bridge();
+    await openReader(tester, harness);
+    await settleEpubPage(tester);
+
+    final surface = dartPage(tester)!.page.surface;
+    final painted = paintedReaderSurface(tester);
+    Offset center(int index) {
+      final rect = surface.endpoints[index].rect;
+      return readerSurfaceToGlobal(
+        painted,
+        Offset((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2),
+      );
+    }
+
+    final last = surface.endpoints.length > 24
+        ? 24
+        : surface.endpoints.length - 1;
+    final finger = await tester.startGesture(
+      center(0),
+      kind: ui.PointerDeviceKind.touch,
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await finger.moveTo(center(last ~/ 2));
+    await tester.pump();
+    await finger.up();
+    await settleReaderSelection(tester);
+    expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+    final end = find.byKey(const ValueKey('reader-selection-handle-end'));
+    expect(end, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('reader-selection-handle-start')),
+      findsOneWidget,
+    );
+
+    final handle = await tester.startGesture(
+      tester.getCenter(end),
+      kind: ui.PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    await handle.moveBy(center(last) - center(last ~/ 2));
+    await tester.pump();
+    await handle.up();
+    await settleReaderSelection(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settleNative(tester, rounds: 2);
+
+    final (_, start, stop) = harness.createdRanges.single;
+    expect(start.toInt(), surface.endpoints[0].rangeStart.toInt());
+    expect(
+      stop.toInt(),
+      greaterThan(surface.endpoints[last ~/ 2].rangeEnd.toInt()),
+      reason: 'the end handle carried the range past where the drag left it',
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await _drainHarness(tester);
+  });
+
+  testWidgets('a range ending after a paragraph break shows its end handle', (
+    tester,
+  ) async {
+    final harness = bridge();
+    await openReader(tester, harness);
+    await settleEpubPage(tester);
+
+    final surface = dartPage(tester)!.page.surface;
+    final painted = paintedReaderSurface(tester);
+    // A paragraph's first grapheme whose offset no visible grapheme ends at:
+    // the separator before it has no box.
+    final after = surface.endpoints.firstWhere(
+      (candidate) =>
+          candidate.offset > BigInt.zero &&
+          candidate.offset == candidate.rangeStart &&
+          !surface.endpoints.any((other) => other.rangeEnd == candidate.offset),
+    );
+    Offset center(FlutterSelectionEndpoint endpoint) {
+      final rect = endpoint.rect;
+      return readerSurfaceToGlobal(
+        painted,
+        Offset((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2),
+      );
+    }
+
+    final finger = await tester.startGesture(
+      center(surface.endpoints.first),
+      kind: ui.PointerDeviceKind.touch,
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await finger.moveTo(center(after));
+    await tester.pump();
+    await finger.up();
+    await settleReaderSelection(tester);
+    expect(
+      find.byKey(const ValueKey('reader-selection-handle-end')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await _drainHarness(tester);
   });
 
   testWidgets('a page turn advances the durable offset inside the chapter', (
