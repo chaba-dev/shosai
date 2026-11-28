@@ -506,8 +506,12 @@ List<BookEdition> _snapshot(Database db, Set<String>? allowed) {
         ]);
         candidates.add(id);
       } on CoreException catch (error) {
-        if (error.kind != CoreErrorKind.limitExceeded) rethrow;
-        // A matching edition must not make its existing notes unloadable.
+        if (error.kind != CoreErrorKind.limitExceeded &&
+            error.kind != CoreErrorKind.unsupported) {
+          rethrow;
+        }
+        // A matching edition must not make its existing notes unloadable,
+        // nor join notes saved with a fingerprint this core does not read.
       }
     }
     // More than one compatible group is ambiguous, not a transitive bridge.

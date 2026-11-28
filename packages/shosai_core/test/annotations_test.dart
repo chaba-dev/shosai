@@ -603,6 +603,20 @@ void main() {
       expect(await t.count('annotation_documents'), 1);
       expect(await t.count('annotation_document_versions'), 1);
       expect(await t.count('annotations'), 4);
+      expect(
+        await t.select(
+          '''SELECT content_hash, fingerprint_algorithm, fingerprint_version
+             FROM annotation_document_versions''',
+        ),
+        [
+          {
+            'content_hash': await _hashOf(t, bookId),
+            'fingerprint_algorithm': fingerprintAlgorithm,
+            'fingerprint_version': fingerprintVersion,
+          },
+        ],
+      );
+      expect((fingerprintAlgorithm, fingerprintVersion), ('sha256', 1));
     });
   });
 
@@ -984,6 +998,73 @@ void main() {
   });
 
   group('association', () {
+    test('an unknown fingerprint is refused and its records kept', () async {
+      final unknown = await book('epub', title: 'Future');
+      final other = await book('epub', title: 'Other');
+      final highlight = await annotations.create(
+        unknown,
+        _select(_text, 'lead'),
+      );
+      final note = await annotations.createNote(
+        unknown,
+        const BookAnchor(),
+        'Kept',
+      );
+      await annotations.create(other, _select(_text, 'tail'));
+      final [version] = await t.select(
+        '''SELECT v.id FROM annotation_document_versions v
+           JOIN annotations a ON a.version_id = v.id WHERE a.id = ?''',
+        [highlight.id],
+      );
+      // As a later Shōsai might save it; this schema refuses to write it.
+      await t.store.transaction((db) {
+        db.execute('PRAGMA ignore_check_constraints = ON');
+        db.execute(
+          '''UPDATE annotation_document_versions
+             SET fingerprint_algorithm = 'sha256', fingerprint_version = 2
+             WHERE id = ?''',
+          [version['id']],
+        );
+        db.execute('PRAGMA ignore_check_constraints = OFF');
+      });
+      Future<List<Map<String, Object?>>> records() =>
+          t.select('''SELECT a.*, v.fingerprint_version FROM annotations a
+           JOIN annotation_document_versions v ON v.id = a.version_id
+           ORDER BY a.rowid''');
+      final before = await records();
+
+      final refused = throwsCoreError(CoreErrorKind.unsupported);
+      await expectLater(annotations.list(unknown, _epubText(_text)), refused);
+      await expectLater(annotations.summary(unknown), refused);
+      await expectLater(
+        annotations.update(unknown, highlight.id, color: HighlightColor.blue),
+        refused,
+      );
+      await expectLater(
+        annotations.updateNote(unknown, note.id, 'Changed'),
+        refused,
+      );
+      await expectLater(annotations.delete(unknown, highlight.id), refused);
+      await expectLater(
+        annotations.create(unknown, _select(_text, 'Café')),
+        refused,
+      );
+      await expectLater(
+        annotations.createNote(unknown, const BookAnchor(), 'More'),
+        refused,
+      );
+      await expectLater(
+        annotations.associate(version['id']! as String, other),
+        refused,
+      );
+      // The rest of the library still reads, without the unknown book.
+      expect((await annotations.associationSources(other)).sources, isEmpty);
+      expect((await annotations.libraryNotes()).books.map((b) => b.book.id), [
+        other,
+      ]);
+      expect(await records(), before);
+    });
+
     test('brings a source document to a book without annotations', () async {
       final original = await book('epub', title: 'First edition');
       final edition = await book('epub');
@@ -1640,6 +1721,152 @@ void main() {
       expect(listed.resolution, AnnotationResolution.exact);
       expect((listed.start, listed.end), (4, 8));
     });
+
+    test(
+      'fingerprints gain their algorithm and version, keeping every record',
+      () async {
+        final directory = tempDataDirectory();
+        final path = '${directory.path}/library.sqlite3';
+        final before = await Store.open(
+          path,
+          migrations: schemaMigrations.where((m) => m.version <= 19).toList(),
+        );
+        final hash = 'c' * 64;
+        const pdfVersion = '44444444-4444-4444-8444-444444444444';
+        await before.transaction((db) {
+          db.execute(
+            '''INSERT INTO books (title, format, file_path, storage_kind,
+               original_path, content_hash, file_size)
+             VALUES ('Old', 'epub', '/old.epub', 'referenced', '/old.epub', ?, 0)''',
+            [hash],
+          );
+          db.execute(
+            "INSERT INTO annotation_documents (id, format) VALUES (?, 'epub')",
+            [_unknownVersion],
+          );
+          db.execute(
+            "INSERT INTO annotation_documents (id, format) VALUES (?, 'pdf')",
+            [pdfVersion],
+          );
+          db.execute(
+            '''INSERT INTO annotation_document_versions
+               (id, document_id, format, content_hash, title)
+             VALUES (?, ?, 'epub', ?, 'Old'),
+                    (?, ?, 'pdf', ?, 'Gone')''',
+            [
+              _unknownVersion,
+              _unknownVersion,
+              hash,
+              pdfVersion,
+              pdfVersion,
+              'd' * 64,
+            ],
+          );
+          db.execute(
+            '''INSERT INTO annotations (id, version_id, format, kind, anchor_version,
+               original_quote, normalization_profile, normalized_exact,
+               normalized_prefix, normalized_suffix, color, body,
+               epub_spine_index, epub_resource_path, epub_scalar_start,
+               epub_scalar_end)
+             VALUES ('33333333-3333-4333-8333-333333333333', ?, 'epub',
+               'highlight', 1, 'lead', 'shosai-quote-v1', 'lead', 'The',
+               'Café text', 'pink', 'Kept', 0, ?, 4, 8)''',
+            [_unknownVersion, _chapter],
+          );
+          db.execute(
+            '''INSERT INTO annotations (id, version_id, format, kind,
+               anchor_version, body, epub_spine_index, epub_scalar_start)
+             VALUES ('55555555-5555-4555-8555-555555555555', ?, 'epub', 'page',
+               1, 'A page note', 0, 12)''',
+            [_unknownVersion],
+          );
+          db.execute(
+            '''INSERT INTO annotations (id, version_id, format, kind,
+               anchor_version, body, deleted_at)
+             VALUES ('66666666-6666-4666-8666-666666666666', ?, 'epub', 'book',
+               1, 'Deleted', '2026-01-01T00:00:00.000Z')''',
+            [_unknownVersion],
+          );
+          db.execute(
+            '''INSERT INTO annotations (id, version_id, format, kind,
+               anchor_version, body, pdf_page)
+             VALUES ('77777777-7777-4777-8777-777777777777', ?, 'pdf', 'page',
+               1, 'Fig. 2', 3)''',
+            [pdfVersion],
+          );
+          db.execute(
+            "INSERT INTO bookmarks (content_hash, unit, location_offset) VALUES (?, 0, 20)",
+            [hash],
+          );
+        });
+        Future<List<Map<String, Object?>>> dump(Store store, String table) =>
+            store.read(
+              (db) => [
+                for (final row in db.select(
+                  'SELECT * FROM $table ORDER BY rowid',
+                ))
+                  {for (final column in row.keys) column: row[column]},
+              ],
+            );
+        final annotationsBefore = await dump(before, 'annotations');
+        final bookmarksBefore = await dump(before, 'bookmarks');
+        final versionsBefore = await dump(
+          before,
+          'annotation_document_versions',
+        );
+        await before.close();
+
+        final store = await Store.open(path);
+        addTearDown(store.close);
+
+        expect(await dump(store, 'annotations'), annotationsBefore);
+        expect(await dump(store, 'bookmarks'), bookmarksBefore);
+        expect(await dump(store, 'annotation_document_versions'), [
+          for (final version in versionsBefore)
+            {
+              ...version,
+              'fingerprint_algorithm': 'sha256',
+              'fingerprint_version': 1,
+            },
+        ]);
+        final [bookRow] = await store.read(
+          (db) => [
+            for (final row in db.select('SELECT id FROM books'))
+              row.columnAt(0),
+          ],
+        );
+        final listed = await Annotations(
+          store,
+        ).list(bookRow as int, _epubText(_text));
+        expect(
+          listed.map((a) => (a.id, a.annotation.kind, a.annotation.body)),
+          [
+            (
+              '33333333-3333-4333-8333-333333333333',
+              AnnotationKind.highlight,
+              'Kept',
+            ),
+            (
+              '55555555-5555-4555-8555-555555555555',
+              AnnotationKind.pageNote,
+              'A page note',
+            ),
+          ],
+        );
+        expect(listed.first.resolution, AnnotationResolution.exact);
+        // An unknown fingerprint is refused rather than stored.
+        await expectLater(
+          store.transaction(
+            (db) => db.execute(
+              '''UPDATE annotation_document_versions
+               SET fingerprint_version = 2 WHERE id = ?''',
+              [_unknownVersion],
+            ),
+          ),
+          throwsA(anything),
+        );
+      },
+    );
   });
 
   group('bookmark notes', () {

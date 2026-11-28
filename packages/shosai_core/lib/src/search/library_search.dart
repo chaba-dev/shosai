@@ -448,7 +448,7 @@ final class LibrarySearchRecords {
 
   /// Document [documentId]'s live notes, in reading order.
   Future<List<NoteEntry>> entries(String documentId) =>
-      _store.read((db) => noteEntries(db, documentId));
+      _store.read((db) => inSnapshot(db, () => noteEntries(db, documentId)));
 
   /// Forget the saved texts of contents no longer in the library.
   Future<void> forgetRemoved() => _store.transaction(_forgetRemoved);
@@ -488,6 +488,9 @@ List<(Book, String)> _noteDocuments(Database db, int? bookId) => [
           WHERE v.content_hash = books.content_hash) AS document
        FROM books
        WHERE document IS NOT NULL AND (?1 IS NULL OR id = ?1)
+         -- A document saved with an unknown fingerprint is not read.
+         AND NOT EXISTS (SELECT 1 FROM annotation_document_versions uv
+           WHERE uv.document_id = document AND NOT (${supportedFingerprint('uv')}))
        ORDER BY $_recent''',
     [bookId],
   ))

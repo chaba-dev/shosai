@@ -516,6 +516,17 @@ ALTER TABLE library_source_previews ADD COLUMN protection TEXT NOT NULL DEFAULT 
 -- Cached previews predate DRM inspection; the bounded preview pass rereads them.
 DELETE FROM library_source_previews;
 '''),
+  Migration(20, 'versioned annotation fingerprints', '''
+-- An annotated version's content_hash is its content fingerprint; the
+-- fingerprint names its algorithm and version beside it, like the anchor
+-- version and normalization profile (RFD 16, anchor contract version 1).
+-- Version 1 is the lowercase hexadecimal SHA-256 of the file's bytes, which
+-- every existing hash already is, so existing rows take it as they are.
+ALTER TABLE annotation_document_versions ADD COLUMN fingerprint_algorithm TEXT
+    NOT NULL DEFAULT 'sha256' CHECK (fingerprint_algorithm = 'sha256');
+ALTER TABLE annotation_document_versions ADD COLUMN fingerprint_version INTEGER
+    NOT NULL DEFAULT 1 CHECK (fingerprint_version = 1);
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

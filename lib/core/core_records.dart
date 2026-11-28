@@ -1100,8 +1100,9 @@ final class CoreRecords implements ShosaiRecords {
             // The title the book had when that content was annotated: what
             // the person recognizes, now that books are known by content.
             localPath: source.title,
-            fingerprintAlgorithm: 'sha256',
-            fingerprintVersion: 1,
+            // Only versions with this fingerprint are offered as sources.
+            fingerprintAlgorithm: fingerprintAlgorithm,
+            fingerprintVersion: fingerprintVersion,
             fingerprint: _hexBytes(source.contentHash),
             liveAnnotations: BigInt.from(source.liveAnnotations),
           ),
