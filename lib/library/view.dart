@@ -47,6 +47,7 @@ export 'package:shosai_flutter/library/controller.dart';
 part 'view_collection.dart';
 part 'view_dialogs.dart';
 part 'view_editions.dart';
+part 'view_list.dart';
 part 'view_navigation.dart';
 
 typedef ProductReaderBuilder =
@@ -1549,6 +1550,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               openBookIds: {for (final open in _shell.model.openBooks) open.id},
               sortBooks: (sort) =>
                   controller.dispatch(LibrarySortChanged(sort)),
+              layoutBooks: (layout) =>
+                  controller.dispatch(LibraryLayoutChanged(layout)),
               openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
               openSourceFile: (file) =>
                   controller.dispatch(LibrarySourceFileOpened(file)),

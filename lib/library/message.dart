@@ -68,6 +68,13 @@ final class LibrarySortChanged extends LibraryMessage {
   final FlutterLibrarySort sort;
 }
 
+/// The books show as a shelf of covers or as rows; the choice is saved with
+/// the settings.
+final class LibraryLayoutChanged extends LibraryMessage {
+  const LibraryLayoutChanged(this.layout);
+  final FlutterLibraryLayout layout;
+}
+
 /// The reader's Display panel changed settings the library saves: the
 /// theme, the EPUB text size and line spacing, or the Pages setting (two pages
 /// side by side, or one). Null fields are unchanged.

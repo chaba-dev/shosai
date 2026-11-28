@@ -291,6 +291,7 @@ class LibraryCollection extends StatelessWidget {
     required this.model,
     this.openBookIds = const {},
     this.sortBooks,
+    this.layoutBooks,
     required this.openBook,
     this.openSourceFile,
     this.openEdition,
@@ -313,6 +314,9 @@ class LibraryCollection extends StatelessWidget {
 
   /// The section head's sort control; null leaves it out.
   final ValueChanged<FlutterLibrarySort>? sortBooks;
+
+  /// The section head's Grid / List control; null leaves it out.
+  final ValueChanged<FlutterLibraryLayout>? layoutBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<LibrarySourceFile>? openSourceFile;
   final void Function(BookEdition, bool choose)? openEdition;
@@ -350,6 +354,7 @@ class LibraryCollection extends StatelessWidget {
     LibraryCollectionState.loading => LibrarySkeletonGrid(
       model: model,
       sortBooks: sortBooks,
+      layoutBooks: layoutBooks,
       retry: retry,
     ),
     LibraryCollectionState.empty ||
@@ -363,6 +368,7 @@ class LibraryCollection extends StatelessWidget {
       model: model,
       openBookIds: openBookIds,
       sortBooks: sortBooks,
+      layoutBooks: layoutBooks,
       openBook: openBook,
       openSourceFile: openSourceFile,
       openEdition: openEdition,
@@ -394,11 +400,13 @@ class _CollectionSectionTitle extends StatelessWidget {
     required this.model,
     required this.layout,
     required this.sortBooks,
+    this.layoutBooks,
   });
 
   final LibraryModel model;
   final ShellLayout layout;
   final ValueChanged<FlutterLibrarySort>? sortBooks;
+  final ValueChanged<FlutterLibraryLayout>? layoutBooks;
 
   /// The narrowest the rule between the head and the sort control gets.
   static const double _minRule = 24;
@@ -440,17 +448,52 @@ class _CollectionSectionTitle extends StatelessWidget {
           ),
         );
         if (sortBooks == null) return head();
-        final sort = ShellSegmentedControl<FlutterLibrarySort>(
-          label: l10n.librarySortLabel,
-          touch: layout.touch,
-          segments: segments,
-          selected: model.sort,
-          onSelected: sortBooks,
+        final layoutBooks = this.layoutBooks;
+        // Where the two controls do not share a phone's line, the layout
+        // control takes the next one, at the end.
+        final sort = Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ShellSegmentedControl<FlutterLibrarySort>(
+              label: l10n.librarySortLabel,
+              touch: layout.touch,
+              segments: segments,
+              selected: model.sort,
+              onSelected: sortBooks,
+            ),
+            if (layoutBooks != null)
+              ShellSegmentedControl<FlutterLibraryLayout>(
+                label: l10n.libraryLayout,
+                touch: layout.touch,
+                segments: [
+                  (
+                    value: FlutterLibraryLayout.grid,
+                    label: l10n.libraryLayoutGrid,
+                  ),
+                  (
+                    value: FlutterLibraryLayout.list,
+                    label: l10n.libraryLayoutList,
+                  ),
+                ],
+                selected: model.layout,
+                onSelected: layoutBooks,
+                icons: const {
+                  FlutterLibraryLayout.grid: LucideIcons.layoutGrid,
+                  FlutterLibraryLayout.list: LucideIcons.layoutList,
+                },
+              ),
+          ],
         );
-        final sortWidth = ShellSegmentedControl.widthOf(
-          context,
-          segments.map((segment) => segment.label),
-        );
+        // Two square icon options in the control's 2 px inset and gap.
+        final option = layout.touch ? ShosaiTokens.sizeTouchTarget : 28.0;
+        final sortWidth =
+            ShellSegmentedControl.widthOf(
+              context,
+              segments.map((segment) => segment.label),
+            ) +
+            (layoutBooks == null ? 0 : 8 + 2 * option + 6);
         final fits =
             _textWidth(context, label, style) +
                 12 +
@@ -576,6 +619,7 @@ class _LibraryGrid extends StatefulWidget {
     required this.model,
     required this.openBookIds,
     required this.sortBooks,
+    required this.layoutBooks,
     required this.openBook,
     required this.openSourceFile,
     required this.openEdition,
@@ -592,6 +636,7 @@ class _LibraryGrid extends StatefulWidget {
   final LibraryModel model;
   final Set<int> openBookIds;
   final ValueChanged<FlutterLibrarySort>? sortBooks;
+  final ValueChanged<FlutterLibraryLayout>? layoutBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<LibrarySourceFile>? openSourceFile;
   final void Function(BookEdition, bool choose)? openEdition;
@@ -645,6 +690,171 @@ class _LibraryGridState extends State<_LibraryGrid> {
     final remaining = position.maxScrollExtent - position.pixels;
     if (remaining > ShosaiTokens.layoutLibraryPagingTriggerDistance) return;
     widget.loadMore();
+  }
+
+  /// One shelf item as a list row: a book, a grouped edition or an unopened
+  /// file, with the same status, actions and cover requests as its card.
+  Widget _listRow(BuildContext context, Object item, bool wide) {
+    final model = widget.model;
+    final l10n = AppLocalizations.of(context);
+    final palette = ShellPalette.of(context);
+    Widget statusText(String text) => Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: shosaiInterfaceStyleForText(_cardMetaStyle(context), text),
+    );
+    if (item is BookEdition) {
+      final coverFile = item.coverFile;
+      final book = model.books
+          .where((b) => b.bookId == coverFile.book?.id)
+          .firstOrNull;
+      final source = model.sourceFiles
+          .where((s) => s.locator == coverFile.locator)
+          .firstOrNull;
+      final reading = item.readingFile;
+      final progress = reading.book?.progress ?? 0.0;
+      return _LibraryListRow(
+        key: ValueKey('edition-${item.id}'),
+        wide: wide,
+        cover: book != null
+            ? LibraryBookCover(
+                book: book,
+                cover: model.covers[book.bookId],
+                demandRevision: model.coverRevision,
+                loadCover: widget.loadCover,
+                type: ShellCoverType.thumbnail,
+                shadow: palette.shelfCoverShadow,
+              )
+            : source != null
+            ? AspectRatio(
+                aspectRatio: 2 / 3,
+                child: _SourceFileCover(
+                  file: source,
+                  cover: model.sourceCovers[source.locator],
+                  demandRevision: model.coverRevision,
+                  loadCover: widget.loadSourceCover,
+                  type: ShellCoverType.thumbnail,
+                ),
+              )
+            : const SizedBox.shrink(),
+        title: item.displayFile.title,
+        author: item.displayFile.author,
+        formats: [
+          for (final format in [BookFormat.epub, BookFormat.pdf])
+            if (item.formats.contains(format))
+              FlutterBookFormat.values.byName(format.name),
+        ],
+        status:
+            !reading.unavailable && reading.protection != BookProtection.none
+            ? const _LockedBookStatus()
+            : statusText(
+                reading.unavailable
+                    ? l10n.libraryBookUnavailable
+                    : reading.book == null
+                    ? reading.source
+                    : shellReadingStatus(l10n, progress),
+              ),
+        progress: progress,
+        lastRead: reading.book?.lastRead,
+        added: reading.book?.dateAdded,
+        open: item.files.any(
+          (file) =>
+              !file.unavailable && widget.openBookIds.contains(file.book?.id),
+        ),
+        onPressed: model.busy
+            ? null
+            : () => widget.openEdition?.call(item, false),
+        action: ShadTooltip(
+          builder: (_) => Text(l10n.editionReadAs),
+          child: ShadButton.ghost(
+            key: ValueKey('edition-read-as-${item.id}'),
+            onPressed: model.busy
+                ? null
+                : () => widget.openEdition?.call(item, true),
+            width: 40,
+            height: 40,
+            padding: EdgeInsets.zero,
+            child: const _CardTriggerSurface(active: false, flat: true),
+          ),
+        ),
+      );
+    }
+    if (item is LibrarySourceFile) {
+      return _LibraryListRow(
+        wide: wide,
+        cover: AspectRatio(
+          aspectRatio: 2 / 3,
+          child: _SourceFileCover(
+            file: item,
+            cover: model.sourceCovers[item.locator],
+            demandRevision: model.coverRevision,
+            loadCover: widget.loadSourceCover,
+            type: ShellCoverType.thumbnail,
+          ),
+        ),
+        title: item.title,
+        author: item.author,
+        formats: [
+          if (item.format case final format?)
+            FlutterBookFormat.values.byName(format.name),
+        ],
+        status: item.failure == null && item.protection != BookProtection.none
+            ? const _LockedBookStatus()
+            : statusText(
+                item.failure == null
+                    ? item.source
+                    : l10n.libraryBookUnavailable,
+              ),
+        progress: 0,
+        onPressed: model.busy ? null : () => widget.openSourceFile?.call(item),
+      );
+    }
+    final book = item as FlutterLibraryBook;
+    final removing = model.removingBookId == book.bookId;
+    return _LibraryListRow(
+      key: ValueKey('book-${book.bookId}'),
+      wide: wide,
+      cover: LibraryBookCover(
+        book: book,
+        cover: model.covers[book.bookId],
+        demandRevision: model.coverRevision,
+        loadCover: widget.loadCover,
+        type: ShellCoverType.thumbnail,
+        shadow: palette.shelfCoverShadow,
+      ),
+      title: book.title,
+      author: book.author,
+      formats: [book.format],
+      status: removing
+          ? statusText(l10n.cardRemoving)
+          : !book.unavailable && book.protection != FlutterBookProtection.none
+          ? const _LockedBookStatus()
+          : statusText(
+              book.unavailable
+                  ? l10n.libraryBookUnavailable
+                  : shellReadingStatus(l10n, book.progress),
+            ),
+      progress: book.progress,
+      lastRead: book.lastRead,
+      added: book.dateAdded,
+      open:
+          !removing &&
+          !book.unavailable &&
+          widget.openBookIds.contains(book.bookId),
+      onPressed: removing ? null : () => widget.openBook(book),
+      action: removing
+          ? null
+          : _BookActionsMenu(
+              managed: book.managed,
+              onRemove: () => widget.removeBook(book),
+              kept: book.keptOnDevice,
+              onKeep: book.located && widget.keepBook != null && !model.busy
+                  ? () => widget.keepBook!(book)
+                  : null,
+              flat: true,
+            ),
+    );
   }
 
   @override
@@ -704,9 +914,10 @@ class _LibraryGridState extends State<_LibraryGrid> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
+        final available = constraints.maxWidth - padding.horizontal;
         final shelf = LibraryShelf.of(
           layout,
-          constraints.maxWidth - padding.horizontal,
+          available,
           editionCards: widget.model.editions != null,
           openTag: widget.model.books.any(
             (book) => widget.openBookIds.contains(book.bookId),
@@ -757,63 +968,76 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         model: widget.model,
                         layout: layout,
                         sortBooks: widget.sortBooks,
+                        layoutBooks: widget.layoutBooks,
                       ),
                     ),
                   ),
-                  SliverGrid.builder(
-                    gridDelegate: shelf.gridDelegate(context),
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final item = items[index];
-                      if (item is BookEdition) {
-                        return _EditionCard(
-                          key: ValueKey('edition-${item.id}'),
-                          edition: item,
-                          model: widget.model,
-                          shelf: shelf,
-                          open: item.files.any(
-                            (file) =>
-                                !file.unavailable &&
-                                widget.openBookIds.contains(file.book?.id),
-                          ),
-                          loadCover: widget.loadCover,
-                          loadSourceCover: widget.loadSourceCover,
-                          onOpen: widget.model.busy
-                              ? null
-                              : () => widget.openEdition?.call(item, false),
-                          onChoose: widget.model.busy
-                              ? null
-                              : () => widget.openEdition?.call(item, true),
-                        );
-                      }
-                      if (item is LibrarySourceFile) {
-                        final file = item;
-                        return _SourceFileCard(
-                          file: file,
-                          cover: widget.model.sourceCovers[file.locator],
+                  if (widget.model.layout == FlutterLibraryLayout.list) ...[
+                    if (_listIsWide(available))
+                      const SliverToBoxAdapter(child: _LibraryListHeader()),
+                    SliverList.builder(
+                      itemCount: items.length,
+                      itemBuilder: (context, index) => _listRow(
+                        context,
+                        items[index],
+                        _listIsWide(available),
+                      ),
+                    ),
+                  ] else
+                    SliverGrid.builder(
+                      gridDelegate: shelf.gridDelegate(context),
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        if (item is BookEdition) {
+                          return _EditionCard(
+                            key: ValueKey('edition-${item.id}'),
+                            edition: item,
+                            model: widget.model,
+                            shelf: shelf,
+                            open: item.files.any(
+                              (file) =>
+                                  !file.unavailable &&
+                                  widget.openBookIds.contains(file.book?.id),
+                            ),
+                            loadCover: widget.loadCover,
+                            loadSourceCover: widget.loadSourceCover,
+                            onOpen: widget.model.busy
+                                ? null
+                                : () => widget.openEdition?.call(item, false),
+                            onChoose: widget.model.busy
+                                ? null
+                                : () => widget.openEdition?.call(item, true),
+                          );
+                        }
+                        if (item is LibrarySourceFile) {
+                          final file = item;
+                          return _SourceFileCard(
+                            file: file,
+                            cover: widget.model.sourceCovers[file.locator],
+                            demandRevision: widget.model.coverRevision,
+                            loadCover: widget.loadSourceCover,
+                            shelf: shelf,
+                            onPressed: widget.model.busy
+                                ? null
+                                : () => widget.openSourceFile?.call(file),
+                          );
+                        }
+                        final book = item as FlutterLibraryBook;
+                        return LibraryBookCard(
+                          book: book,
+                          cover: widget.model.covers[book.bookId],
                           demandRevision: widget.model.coverRevision,
-                          loadCover: widget.loadSourceCover,
                           shelf: shelf,
-                          onPressed: widget.model.busy
-                              ? null
-                              : () => widget.openSourceFile?.call(file),
+                          open: widget.openBookIds.contains(book.bookId),
+                          removing: widget.model.removingBookId == book.bookId,
+                          loadCover: widget.loadCover,
+                          openBook: widget.openBook,
+                          removeBook: widget.removeBook,
+                          keepBook: widget.model.busy ? null : widget.keepBook,
                         );
-                      }
-                      final book = item as FlutterLibraryBook;
-                      return LibraryBookCard(
-                        book: book,
-                        cover: widget.model.covers[book.bookId],
-                        demandRevision: widget.model.coverRevision,
-                        shelf: shelf,
-                        open: widget.openBookIds.contains(book.bookId),
-                        removing: widget.model.removingBookId == book.bookId,
-                        loadCover: widget.loadCover,
-                        openBook: widget.openBook,
-                        removeBook: widget.removeBook,
-                        keepBook: widget.model.busy ? null : widget.keepBook,
-                      );
-                    },
-                  ),
+                      },
+                    ),
                 ],
               ),
             ),
@@ -871,6 +1095,7 @@ class LibrarySkeletonGrid extends StatelessWidget {
     super.key,
     required this.model,
     this.sortBooks,
+    this.layoutBooks,
     required this.retry,
   });
 
@@ -878,6 +1103,9 @@ class LibrarySkeletonGrid extends StatelessWidget {
 
   /// The section head's sort control; null leaves it out.
   final ValueChanged<FlutterLibrarySort>? sortBooks;
+
+  /// The section head's Grid / List control; null leaves it out.
+  final ValueChanged<FlutterLibraryLayout>? layoutBooks;
 
   /// The failure alert's recovery action.
   final VoidCallback retry;
@@ -924,15 +1152,23 @@ class LibrarySkeletonGrid extends StatelessWidget {
                         model: model,
                         layout: layout,
                         sortBooks: sortBooks,
+                        layoutBooks: layoutBooks,
                       ),
                     ),
                   ),
-                  SliverGrid.builder(
-                    gridDelegate: shelf.gridDelegate(context),
-                    itemCount: _placeholderCount,
-                    itemBuilder: (context, index) =>
-                        const LibrarySkeletonCard(),
-                  ),
+                  if (model.layout == FlutterLibraryLayout.list)
+                    SliverList.builder(
+                      itemCount: _placeholderCount,
+                      itemBuilder: (context, index) =>
+                          const _LibraryListSkeletonRow(),
+                    )
+                  else
+                    SliverGrid.builder(
+                      gridDelegate: shelf.gridDelegate(context),
+                      itemCount: _placeholderCount,
+                      itemBuilder: (context, index) =>
+                          const LibrarySkeletonCard(),
+                    ),
                 ],
               ),
             ),
@@ -1886,12 +2122,16 @@ class _BookActionsMenu extends StatefulWidget {
     required this.onRemove,
     this.onKeep,
     this.kept = false,
+    this.flat = false,
   });
 
   final bool managed;
   final VoidCallback onRemove;
   final VoidCallback? onKeep;
   final bool kept;
+
+  /// The trigger sits on the page, in a list row, rather than on a cover.
+  final bool flat;
 
   @override
   State<_BookActionsMenu> createState() => _BookActionsMenuState();
@@ -1949,13 +2189,14 @@ class _BookActionsMenuState extends State<_BookActionsMenu> {
           width: target.width,
           height: target.height,
           child: Align(
-            alignment: Alignment.topRight,
+            alignment: widget.flat ? Alignment.center : Alignment.topRight,
             child: ListenableBuilder(
               listenable: Listenable.merge(<Listenable>[
                 _triggerStates,
                 _controller,
               ]),
               builder: (context, _) => _CardTriggerSurface(
+                flat: widget.flat,
                 active:
                     _controller.isOpen ||
                     _triggerStates.value.contains(ShadState.hovered) ||
@@ -2075,27 +2316,39 @@ Color get _triggerNoFill => ShosaiTokens.appShadowBase.withValues(alpha: 0);
 /// refinement's translucent ink scrim rather than the reference's opaque
 /// surface; [active] deepens it for hover, press and the open menu.
 class _CardTriggerSurface extends StatelessWidget {
-  const _CardTriggerSurface({required this.active});
+  const _CardTriggerSurface({required this.active, this.flat = false});
 
   /// Whether the trigger is hovered, pressed or holding an open menu.
   final bool active;
 
+  /// On the page rather than a cover: `ink-muted` on no fill, taking `hover`
+  /// while active.
+  final bool flat;
+
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: ShosaiTokens.appShadowBase.withValues(
-        alpha: active
-            ? ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha
-            : ShosaiTokens.layoutLibraryCardTriggerScrimAlpha,
+  Widget build(BuildContext context) {
+    final palette = ShellPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: flat
+            ? (active ? palette.hover : _triggerNoFill)
+            : ShosaiTokens.appShadowBase.withValues(
+                alpha: active
+                    ? ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha
+                    : ShosaiTokens.layoutLibraryCardTriggerScrimAlpha,
+              ),
+        borderRadius: BorderRadius.circular(ShosaiTokens.radiusSmall),
       ),
-      borderRadius: BorderRadius.circular(ShosaiTokens.radiusSmall),
-    ),
-    child: const Padding(
-      padding: EdgeInsets.symmetric(
-        vertical: ShosaiTokens.layoutLibraryCardTriggerPaddingVertical,
-        horizontal: ShosaiTokens.layoutLibraryCardTriggerPaddingHorizontal,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: ShosaiTokens.layoutLibraryCardTriggerPaddingVertical,
+          horizontal: ShosaiTokens.layoutLibraryCardTriggerPaddingHorizontal,
+        ),
+        child: Icon(
+          LucideIcons.ellipsis,
+          color: flat ? palette.inkMuted : ShosaiTokens.appTextOnAccent,
+        ),
       ),
-      child: Icon(LucideIcons.ellipsis, color: ShosaiTokens.appTextOnAccent),
-    ),
-  );
+    );
+  }
 }

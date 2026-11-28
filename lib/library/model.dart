@@ -107,6 +107,7 @@ final class LibraryModel {
     this.query = '',
     this.format,
     this.sort = FlutterLibrarySort.recent,
+    this.layout = FlutterLibraryLayout.grid,
     this.bookCount,
     this.continueReading,
     this.continueReadingNotes,
@@ -143,6 +144,9 @@ final class LibraryModel {
 
   /// The shelf's order.
   final FlutterLibrarySort sort;
+
+  /// Whether the books show as a shelf of covers or as rows.
+  final FlutterLibraryLayout layout;
 
   /// How many books the whole library holds, as the last page reported it;
   /// null until a page has said.
@@ -247,6 +251,7 @@ final class LibraryModel {
     String? query,
     Object? format = _same,
     FlutterLibrarySort? sort,
+    FlutterLibraryLayout? layout,
     Object? bookCount = _same,
     Object? continueReading = _same,
     Object? continueReadingNotes = _same,
@@ -281,6 +286,7 @@ final class LibraryModel {
         ? this.format
         : format as FlutterBookFormat?,
     sort: sort ?? this.sort,
+    layout: layout ?? this.layout,
     bookCount: identical(bookCount, _same) ? this.bookCount : bookCount as int?,
     continueReading: identical(continueReading, _same)
         ? this.continueReading

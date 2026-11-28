@@ -1290,6 +1290,54 @@ abstract class AppLocalizations {
   /// **'Author'**
   String get librarySortAuthor;
 
+  /// The accessible name of the library's Grid / List control.
+  ///
+  /// In en, this message translates to:
+  /// **'Layout'**
+  String get libraryLayout;
+
+  /// The library's layout control: the books as a shelf of covers. Its tooltip and accessible name; the option shows only an icon.
+  ///
+  /// In en, this message translates to:
+  /// **'Grid'**
+  String get libraryLayoutGrid;
+
+  /// The library's layout control: the books as rows. Its tooltip and accessible name; the option shows only an icon.
+  ///
+  /// In en, this message translates to:
+  /// **'List'**
+  String get libraryLayoutList;
+
+  /// The library list's column label over each book's title and author.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get libraryListTitle;
+
+  /// The library list's column label over each book's format (EPUB, PDF).
+  ///
+  /// In en, this message translates to:
+  /// **'Format'**
+  String get libraryListFormat;
+
+  /// The library list's column label over how far each book is read.
+  ///
+  /// In en, this message translates to:
+  /// **'Progress'**
+  String get libraryListProgress;
+
+  /// The library list's column label over the date each book was last read.
+  ///
+  /// In en, this message translates to:
+  /// **'Last read'**
+  String get libraryListLastRead;
+
+  /// The library list's column label over the date each book was added to the library.
+  ///
+  /// In en, this message translates to:
+  /// **'Added'**
+  String get libraryListAdded;
+
   /// The shelf card's meta line: the book is open (in Reading now).
   ///
   /// In en, this message translates to:

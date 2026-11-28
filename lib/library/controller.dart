@@ -138,6 +138,7 @@ class LibraryController implements Listenable {
   /// Whether the shelf's order was chosen in this session, so the saved one
   /// no longer applies.
   bool _sortChosen = false;
+  bool _layoutChosen = false;
 
   /// Whether a settings write is running. Writes run one at a time, each
   /// with the settings as they are when it starts: a change made meanwhile
@@ -301,6 +302,24 @@ class LibraryController implements Listenable {
         if (settings != null) _saveSettings();
         _loadRevision += 1;
         _load();
+      case LibraryLayoutChanged():
+        // A choice made before the settings arrive counts even when it is the
+        // layout on screen: it still outranks the saved one.
+        if (message.layout == _model.layout &&
+            (_layoutChosen || _model.settings != null)) {
+          return;
+        }
+        _layoutChosen = true;
+        final settings = _model.settings?.copyWith(
+          libraryLayout: message.layout,
+        );
+        _emit(
+          _model.copyWith(
+            layout: message.layout,
+            settings: settings ?? _model.settings,
+          ),
+        );
+        if (settings != null) _saveSettings();
       case LibraryDisplayChanged():
         final settings = _model.settings;
         if (settings == null) return;
@@ -419,7 +438,15 @@ class LibraryController implements Listenable {
         if (!_closing &&
             message.revision == _loadRevision &&
             _model.settings == null) {
-          _emit(_model.copyWith(settings: message.settings));
+          // A layout chosen while the settings loaded is the one kept, and
+          // saved now that there are settings to save it with.
+          final settings = _layoutChosen
+              ? message.settings.copyWith(libraryLayout: _model.layout)
+              : message.settings;
+          _emit(
+            _model.copyWith(settings: settings, layout: settings.libraryLayout),
+          );
+          if (settings != message.settings) _saveSettings();
         }
       case _LibraryDiscoveryProgressed():
         if (message.revision == _loadRevision &&

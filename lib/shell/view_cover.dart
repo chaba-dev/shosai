@@ -8,6 +8,7 @@ final class ShellCoverType {
     required this.titleLineHeight,
     required this.padding,
     this.showAuthor = true,
+    this.showTitle = true,
   });
 
   /// A cover on the shelf.
@@ -46,10 +47,21 @@ final class ShellCoverType {
     showAuthor: false,
   );
 
+  /// A list row's thumbnail: too small to set a title, so it shows only the
+  /// ground and its band.
+  static const thumbnail = ShellCoverType(
+    titleSize: 0,
+    titleLineHeight: 0,
+    padding: EdgeInsets.zero,
+    showAuthor: false,
+    showTitle: false,
+  );
+
   final double titleSize;
   final double titleLineHeight;
   final EdgeInsets padding;
   final bool showAuthor;
+  final bool showTitle;
 }
 
 /// A typographic cover for a book without its own: the title in the editorial
@@ -107,19 +119,20 @@ class ShellGeneratedCover extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Flexible(
-                    child: Text(
-                      title,
-                      // A cover sets its text flush left whatever button it
-                      // sits in.
-                      textAlign: TextAlign.start,
-                      overflow: TextOverflow.fade,
-                      style: shellEditorialStyle(
-                        type.titleSize,
-                        type.titleLineHeight,
-                      ).copyWith(color: ShellPalette.coverInk),
+                  if (type.showTitle)
+                    Flexible(
+                      child: Text(
+                        title,
+                        // A cover sets its text flush left whatever button it
+                        // sits in.
+                        textAlign: TextAlign.start,
+                        overflow: TextOverflow.fade,
+                        style: shellEditorialStyle(
+                          type.titleSize,
+                          type.titleLineHeight,
+                        ).copyWith(color: ShellPalette.coverInk),
+                      ),
                     ),
-                  ),
                   if (type.showAuthor && author != null)
                     _CoverAuthor(author: author),
                 ],

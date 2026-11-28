@@ -1230,6 +1230,7 @@ void main() {
       progress: FlutterReaderProgress.percent,
       zonesHintDismissed: true,
       librarySort: FlutterLibrarySort.title,
+      libraryLayout: FlutterLibraryLayout.list,
     );
     await bridge.saveReaderSettings(value: settings);
     expect(

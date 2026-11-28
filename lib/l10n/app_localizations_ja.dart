@@ -697,6 +697,30 @@ class AppLocalizationsJa extends AppLocalizations {
   String get librarySortAuthor => '著者';
 
   @override
+  String get libraryLayout => '表示';
+
+  @override
+  String get libraryLayoutGrid => 'グリッド';
+
+  @override
+  String get libraryLayoutList => 'リスト';
+
+  @override
+  String get libraryListTitle => 'タイトル';
+
+  @override
+  String get libraryListFormat => '形式';
+
+  @override
+  String get libraryListProgress => '進捗';
+
+  @override
+  String get libraryListLastRead => '最後に読んだ日';
+
+  @override
+  String get libraryListAdded => '追加日';
+
+  @override
   String get cardOpenTag => '開いた本';
 
   @override

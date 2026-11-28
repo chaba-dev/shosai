@@ -473,6 +473,43 @@ void main() {
     await _settle();
   });
 
+  test('the layout is saved, and one chosen before the settings arrive is '
+      'kept', () async {
+    final bridge = _StubLibraryBridge()
+      ..storedSettings = const FlutterReaderSettings(
+        continuous: false,
+        theme: 'light',
+        epubFontSize: 18,
+        epubLineSpacing: 1.5,
+        pdfZoom: 0,
+        libraryLayout: FlutterLibraryLayout.list,
+      );
+    final controller = _controller(bridge);
+
+    // The grid is already on screen, but choosing it still outranks the
+    // saved list that is loading.
+    controller.dispatch(const LibraryStarted());
+    controller.dispatch(const LibraryLayoutChanged(FlutterLibraryLayout.grid));
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+    expect(controller.model.layout, FlutterLibraryLayout.grid);
+    expect(bridge.storedSettings.libraryLayout, FlutterLibraryLayout.grid);
+
+    // A later choice is shown and saved, without reloading the shelf.
+    final pages = bridge.pages.length;
+    controller.dispatch(const LibraryLayoutChanged(FlutterLibraryLayout.list));
+    await _settle();
+    expect(controller.model.layout, FlutterLibraryLayout.list);
+    expect(bridge.storedSettings.libraryLayout, FlutterLibraryLayout.list);
+    expect(bridge.pages, hasLength(pages));
+
+    controller.dispose();
+    await _settle();
+  });
+
   test('changes made while the settings save are all kept', () async {
     final bridge = _StubLibraryBridge();
     final controller = LibraryController(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -1515,6 +1516,76 @@ void main() {
         findsOneWidget,
         reason: 'Space opens the menu from the keyboard',
       );
+    });
+  });
+
+  group('list layout', () {
+    for (final (name, size) in const [
+      ('desktop', Size(1280, 800)),
+      ('tablet', Size(1024, 768)),
+      ('phone', Size(390, 844)),
+    ]) {
+      testWidgets('the $name library switches to rows and saves the choice', (
+        tester,
+      ) async {
+        FlutterLibraryBook? opened;
+        final bridge = await pumpLibrary(
+          tester,
+          size: size,
+          onOpen: (book) => opened = book,
+        );
+        expect(find.byType(LibraryBookCard), findsWidgets);
+        await tester.tap(find.byTooltip('List'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LibraryBookCard), findsNothing);
+        expect(bridge.savedSettings?.libraryLayout, FlutterLibraryLayout.list);
+        // The desktop list labels its columns; tablet and phone rows stack.
+        expect(
+          find.text('LAST READ'),
+          name == 'desktop' ? findsOneWidget : findsNothing,
+        );
+        if (Platform.environment.containsKey(harnessArtifactDirVariable)) {
+          await captureHarnessArtifact(tester, 'library-list-$name');
+        }
+        expect(tester.takeException(), isNull);
+
+        // A row opens its book.
+        final book = harnessLibraryBooks().last;
+        final row = find.text(book.title).last;
+        await tester.scrollUntilVisible(
+          row,
+          120,
+          scrollable: find
+              .descendant(
+                of: find.byType(LibraryCollection),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.tap(row);
+        await tester.pumpAndSettle();
+        expect(opened?.bookId, book.bookId);
+      });
+    }
+
+    testWidgets('a saved list layout opens as rows', (tester) async {
+      await pumpLibrary(
+        tester,
+        bridge: HarnessBridge(
+          books: harnessLibraryBooks(),
+          covers: harnessCovers(),
+          settings: const FlutterReaderSettings(
+            continuous: false,
+            theme: 'light',
+            epubFontSize: 18,
+            epubLineSpacing: 1.6,
+            pdfZoom: 0,
+            libraryLayout: FlutterLibraryLayout.list,
+          ),
+        ),
+      );
+      expect(find.byType(LibraryBookCard), findsNothing);
+      expect(find.text('LAST READ'), findsOneWidget);
     });
   });
 

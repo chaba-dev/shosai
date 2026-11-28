@@ -730,6 +730,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String get librarySortAuthor => 'Author';
 
   @override
+  String get libraryLayout => 'Layout';
+
+  @override
+  String get libraryLayoutGrid => 'Grid';
+
+  @override
+  String get libraryLayoutList => 'List';
+
+  @override
+  String get libraryListTitle => 'Title';
+
+  @override
+  String get libraryListFormat => 'Format';
+
+  @override
+  String get libraryListProgress => 'Progress';
+
+  @override
+  String get libraryListLastRead => 'Last read';
+
+  @override
+  String get libraryListAdded => 'Added';
+
+  @override
   String get cardOpenTag => 'Open';
 
   @override

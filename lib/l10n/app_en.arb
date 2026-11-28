@@ -1020,6 +1020,38 @@
   "@librarySortAuthor": {
     "description": "The library's sort control: by author."
   },
+  "libraryLayout": "Layout",
+  "@libraryLayout": {
+    "description": "The accessible name of the library's Grid / List control."
+  },
+  "libraryLayoutGrid": "Grid",
+  "@libraryLayoutGrid": {
+    "description": "The library's layout control: the books as a shelf of covers. Its tooltip and accessible name; the option shows only an icon."
+  },
+  "libraryLayoutList": "List",
+  "@libraryLayoutList": {
+    "description": "The library's layout control: the books as rows. Its tooltip and accessible name; the option shows only an icon."
+  },
+  "libraryListTitle": "Title",
+  "@libraryListTitle": {
+    "description": "The library list's column label over each book's title and author."
+  },
+  "libraryListFormat": "Format",
+  "@libraryListFormat": {
+    "description": "The library list's column label over each book's format (EPUB, PDF)."
+  },
+  "libraryListProgress": "Progress",
+  "@libraryListProgress": {
+    "description": "The library list's column label over how far each book is read."
+  },
+  "libraryListLastRead": "Last read",
+  "@libraryListLastRead": {
+    "description": "The library list's column label over the date each book was last read."
+  },
+  "libraryListAdded": "Added",
+  "@libraryListAdded": {
+    "description": "The library list's column label over the date each book was added to the library."
+  },
   "cardOpenTag": "Open",
   "@cardOpenTag": {
     "description": "The shelf card's meta line: the book is open (in Reading now)."

@@ -719,6 +719,9 @@ class FlutterLibraryBook {
 /// The order a library page lists books in.
 enum FlutterLibrarySort { recent, title, author }
 
+/// How the library shows its books: a shelf of covers, or rows.
+enum FlutterLibraryLayout { grid, list }
+
 /// A book's notes at a glance: how many there are, and the words of the
 /// latest one (its quote, or its note when it quotes nothing).
 class FlutterNotesSummary {
@@ -932,6 +935,7 @@ class FlutterReaderSettings {
   final FlutterReaderProgress progress;
   final bool zonesHintDismissed;
   final FlutterLibrarySort librarySort;
+  final FlutterLibraryLayout libraryLayout;
 
   const FlutterReaderSettings({
     required this.continuous,
@@ -945,6 +949,7 @@ class FlutterReaderSettings {
     this.progress = FlutterReaderProgress.page,
     this.zonesHintDismissed = false,
     this.librarySort = FlutterLibrarySort.recent,
+    this.libraryLayout = FlutterLibraryLayout.grid,
   });
 
   static const _samePdfFit = Object();
@@ -962,6 +967,7 @@ class FlutterReaderSettings {
     FlutterReaderProgress? progress,
     bool? zonesHintDismissed,
     FlutterLibrarySort? librarySort,
+    FlutterLibraryLayout? libraryLayout,
   }) => FlutterReaderSettings(
     continuous: continuous ?? this.continuous,
     theme: theme ?? this.theme,
@@ -976,6 +982,7 @@ class FlutterReaderSettings {
     progress: progress ?? this.progress,
     zonesHintDismissed: zonesHintDismissed ?? this.zonesHintDismissed,
     librarySort: librarySort ?? this.librarySort,
+    libraryLayout: libraryLayout ?? this.libraryLayout,
   );
 
   @override
@@ -990,7 +997,8 @@ class FlutterReaderSettings {
       animations.hashCode ^
       progress.hashCode ^
       zonesHintDismissed.hashCode ^
-      librarySort.hashCode;
+      librarySort.hashCode ^
+      libraryLayout.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1007,7 +1015,8 @@ class FlutterReaderSettings {
           animations == other.animations &&
           progress == other.progress &&
           zonesHintDismissed == other.zonesHintDismissed &&
-          librarySort == other.librarySort;
+          librarySort == other.librarySort &&
+          libraryLayout == other.libraryLayout;
 }
 
 class FlutterReadingState {

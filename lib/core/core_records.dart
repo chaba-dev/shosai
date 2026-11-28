@@ -626,6 +626,7 @@ final class CoreRecords implements ShosaiRecords {
     _token(cancellationId).throwIfCancelled();
     final settings = await _core.settings.load();
     final sort = await _core.librarySettings.loadSort();
+    final layout = await _core.librarySettings.loadLayout();
     return FlutterReaderSettings(
       continuous: settings.continuous,
       theme: settings.theme.name,
@@ -640,6 +641,7 @@ final class CoreRecords implements ShosaiRecords {
       progress: FlutterReaderProgress.values.byName(settings.progress.name),
       zonesHintDismissed: settings.zonesHintDismissed,
       librarySort: FlutterLibrarySort.values.byName(sort.name),
+      libraryLayout: FlutterLibraryLayout.values.byName(layout.name),
     );
   });
 
@@ -672,6 +674,9 @@ final class CoreRecords implements ShosaiRecords {
         );
         await _core.librarySettings.saveSort(
           LibrarySort.values.byName(value.librarySort.name),
+        );
+        await _core.librarySettings.saveLayout(
+          LibraryLayout.values.byName(value.libraryLayout.name),
         );
       });
 
