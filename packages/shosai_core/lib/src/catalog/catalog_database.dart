@@ -57,6 +57,17 @@ typedef CatalogBookDetails = ({
   String? summary,
   int? readingEase,
 
+  /// The long description, as plain paragraphs separated by blank lines.
+  String? description,
+  int? wordCount,
+
+  /// The calendar date (`YYYY-MM-DD`) a source released its edition: never a
+  /// publication year.
+  String? released,
+
+  /// The series the book belongs to, with its position when numbered.
+  List<({String name, int? position})> series,
+
   /// Up to [catalogMoreByAuthorLimit] other books by the first author.
   List<CatalogBook> moreByAuthor,
 });
@@ -468,10 +479,23 @@ CatalogBookDetails? catalogBook(String path, String id) {
       WHERE ba.book_id=? ORDER BY ba.position''',
       [id],
     );
+    // A version 2 catalog installed before these details existed lacks their
+    // columns and the series table; it reads as having none of them.
+    final columns = {
+      for (final row in db.select('PRAGMA table_info(book_details)'))
+        row['name'] as String,
+    };
     final described = db.select(
-      'SELECT summary, reading_ease FROM book_details WHERE book_id=?',
+      'SELECT ${[
+        for (final column in ['summary', 'reading_ease', 'description', 'word_count', 'released']) columns.contains(column) ? column : 'NULL AS $column',
+      ].join(', ')} FROM book_details WHERE book_id=?',
       [id],
     ).firstOrNull;
+    final hasSeries = db
+        .select(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='book_series'",
+        )
+        .isNotEmpty;
     return (
       book: _book(db, rows.single),
       editions: List<CatalogEdition>.unmodifiable(
@@ -523,6 +547,24 @@ CatalogBookDetails? catalogBook(String path, String id) {
       ),
       summary: described?['summary'] as String?,
       readingEase: described?['reading_ease'] as int?,
+      description: described?['description'] as String?,
+      wordCount: described?['word_count'] as int?,
+      released: described?['released'] as String?,
+      series: !hasSeries
+          ? const []
+          : List.unmodifiable(
+              db
+                  .select(
+                    'SELECT series, position FROM book_series WHERE book_id=? ORDER BY series',
+                    [id],
+                  )
+                  .map(
+                    (row) => (
+                      name: row['series'] as String,
+                      position: row['position'] as int?,
+                    ),
+                  ),
+            ),
       moreByAuthor: authors.isEmpty
           ? const []
           : List<CatalogBook>.unmodifiable(

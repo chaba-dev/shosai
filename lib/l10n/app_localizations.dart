@@ -2646,6 +2646,48 @@ abstract class AppLocalizations {
   /// **'{year} BCE'**
   String catalogYearBce(int year);
 
+  /// No description provided for @catalogAboutBook.
+  ///
+  /// In en, this message translates to:
+  /// **'About this book'**
+  String get catalogAboutBook;
+
+  /// No description provided for @catalogSeries.
+  ///
+  /// In en, this message translates to:
+  /// **'Series'**
+  String get catalogSeries;
+
+  /// No description provided for @catalogSeriesPosition.
+  ///
+  /// In en, this message translates to:
+  /// **'{series}, book {position}'**
+  String catalogSeriesPosition(String series, int position);
+
+  /// No description provided for @catalogLength.
+  ///
+  /// In en, this message translates to:
+  /// **'Length'**
+  String get catalogLength;
+
+  /// No description provided for @catalogWordCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 word} other{{count} words}}'**
+  String catalogWordCount(int count);
+
+  /// No description provided for @catalogReleased.
+  ///
+  /// In en, this message translates to:
+  /// **'Released'**
+  String get catalogReleased;
+
+  /// A source's edition release date, never a publication date.
+  ///
+  /// In en, this message translates to:
+  /// **'{date}'**
+  String catalogReleasedOn(DateTime date);
+
   /// No description provided for @catalogMoreByAuthor.
   ///
   /// In en, this message translates to:
