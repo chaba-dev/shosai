@@ -167,6 +167,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Show a long title's volume on shelf cards (#375)
 - *(catalog)* Keep the Gutenberg subtitles the CSV drops (#374)
 - *(library)* Keep a removed book hidden by content across moves and revisions (#377)
+- *(reader)* Show a book's first page before its highlights load (#379)
 
 ### 🚜 Refactor
 
