@@ -91,6 +91,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Show book descriptions, series and release dates (#366)
 - *(catalog)* Name the source of a book's release date (#368)
 - *(catalog)* Cap phone subject tags and give book facts their own line (#370)
+- *(reader)* Add draggable selection handles on touch (#373)
 
 ### 🐛 Bug Fixes
 
