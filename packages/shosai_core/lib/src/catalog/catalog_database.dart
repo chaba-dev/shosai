@@ -65,6 +65,9 @@ typedef CatalogBookDetails = ({
   /// publication year.
   String? released,
 
+  /// The name of the source that released the edition on [released].
+  String? releasedBy,
+
   /// The series the book belongs to, with its position when numbered.
   List<({String name, int? position})> series,
 
@@ -488,6 +491,7 @@ CatalogBookDetails? catalogBook(String path, String id) {
     final described = db.select(
       'SELECT ${[
         for (final column in ['summary', 'reading_ease', 'description', 'word_count', 'released']) columns.contains(column) ? column : 'NULL AS $column',
+        columns.contains('released_by') ? '(SELECT name FROM sources WHERE id=released_by) AS released_by' : 'NULL AS released_by',
       ].join(', ')} FROM book_details WHERE book_id=?',
       [id],
     ).firstOrNull;
@@ -550,6 +554,7 @@ CatalogBookDetails? catalogBook(String path, String id) {
       description: described?['description'] as String?,
       wordCount: described?['word_count'] as int?,
       released: described?['released'] as String?,
+      releasedBy: described?['released_by'] as String?,
       series: !hasSeries
           ? const []
           : List.unmodifiable(

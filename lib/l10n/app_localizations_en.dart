@@ -1664,6 +1664,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String catalogReleasedBy(DateTime date, String source) {
+    final intl.DateFormat dateDateFormat = intl.DateFormat.yMMMMd(localeName);
+    final String dateString = dateDateFormat.format(date);
+
+    return '$dateString by $source';
+  }
+
+  @override
   String catalogMoreByAuthor(String author) {
     return 'More by $author';
   }

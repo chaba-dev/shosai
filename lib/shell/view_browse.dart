@@ -1425,7 +1425,13 @@ class _CatalogAboutBook extends StatelessWidget {
       if (details.released case final released?)
         (
           l10n.catalogReleased,
-          l10n.catalogReleasedOn(DateTime.parse('${released}T00:00:00Z')),
+          switch ((
+            DateTime.parse('${released}T00:00:00Z'),
+            details.releasedBy,
+          )) {
+            (final date, final source?) => l10n.catalogReleasedBy(date, source),
+            (final date, null) => l10n.catalogReleasedOn(date),
+          },
         ),
     ];
     final description = switch (details.description?.trim()) {
