@@ -1304,6 +1304,18 @@ final class ApplicationBridge
       });
 
   @override
+  Future<String?> catalogLayout() => records._guard(() async {
+    if (records._closed) throw const CoreException.cancelled();
+    return Preferences(records._core.store).get('search.catalog.layout');
+  });
+
+  @override
+  Future<void> saveCatalogLayout(String layout) => records._guard(() async {
+    if (records._closed) throw const CoreException.cancelled();
+    await Preferences(records._core.store).set('search.catalog.layout', layout);
+  });
+
+  @override
   Future<CatalogSaveOptions> catalogSaveOptions() => records._guard(() async {
     if (records._closed) throw const CoreException.cancelled();
     final options = await folders.saveOptions();

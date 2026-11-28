@@ -87,6 +87,14 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
     final browse =
         c.query.trim().isEmpty && c.category == null && c.author == null;
     final discovery = browse && c.filter == BrowseFilter.all;
+    final heading =
+        c.author?.name ?? _categoryLabel(c.category) ?? l10n.catalogFreeBooks;
+    // Larger screens show mixed results' free books on a cover shelf or, by
+    // choice, as rows, where long titles stay readable.
+    final shelf =
+        c.filter == BrowseFilter.all &&
+        widget.layout != ShellLayout.phone &&
+        model.books.isNotEmpty;
     void chooseLocal(ShellSearchChoice choice) {
       widget.dispatch(const BrowseSearchSubmitted());
       widget.onChosen(choice);
@@ -398,14 +406,51 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                 ),
             ],
             if (catalog && !discovery) ...[
-              _heading(
-                c.author?.name ??
-                    _categoryLabel(c.category) ??
-                    l10n.catalogFreeBooks,
-              ),
-              if (c.filter == BrowseFilter.all &&
-                  widget.layout != ShellLayout.phone &&
-                  model.books.isNotEmpty)
+              if (shelf)
+                // The control's touch height sets the row; the heading's
+                // usual gap then follows the whole row.
+                Padding(
+                  padding: const EdgeInsets.only(bottom: ShosaiTokens.space4),
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: ShosaiTokens.space3,
+                    runSpacing: ShosaiTokens.space2,
+                    children: [
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          heading,
+                          style: shellEditorialStyle(22, 28),
+                        ),
+                      ),
+                      ShellSegmentedControl<BrowseLayout>(
+                        label: l10n.catalogLayout,
+                        touch: widget.layout.touch,
+                        segments: [
+                          (
+                            value: BrowseLayout.grid,
+                            label: l10n.catalogLayoutGrid,
+                          ),
+                          (
+                            value: BrowseLayout.list,
+                            label: l10n.catalogLayoutList,
+                          ),
+                        ],
+                        icons: const {
+                          BrowseLayout.grid: LucideIcons.layoutGrid,
+                          BrowseLayout.list: LucideIcons.layoutList,
+                        },
+                        selected: model.layout,
+                        onSelected: (layout) =>
+                            widget.dispatch(BrowseLayoutChanged(layout)),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                _heading(heading),
+              if (shelf && model.layout == BrowseLayout.grid)
                 SizedBox(
                   height: _CatalogShelfCard.heightOf(context),
                   child: ListView.separated(

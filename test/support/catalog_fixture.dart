@@ -148,6 +148,12 @@ class CatalogHarnessBridge extends HarnessBridge
     recentSearches = List.of(queries);
   }
 
+  String? layout;
+  @override
+  Future<String?> catalogLayout() async => layout;
+  @override
+  Future<void> saveCatalogLayout(String layout) async => this.layout = layout;
+
   @override
   Future<CatalogSaveOptions> catalogSaveOptions() async => (
     locations: [

@@ -64,6 +64,7 @@ class BrowseController extends ChangeNotifier {
   bool _historyRequested = false;
   bool _historyLoaded = false;
   bool _historyDirty = false;
+  bool _layoutChosen = false;
   Future<void> _historyWrite = Future.value();
 
   void _localChanged() {
@@ -90,6 +91,13 @@ class BrowseController extends ChangeNotifier {
               );
             } catch (_) {
               dispatch(const _BrowseHistoryLoaded([]));
+            }
+            try {
+              final name = await (_bridge as CatalogHost).catalogLayout();
+              final layout = BrowseLayout.values.asNameMap()[name];
+              if (layout != null) dispatch(_BrowseLayoutLoaded(layout));
+            } catch (_) {
+              // The default layout stands when the preference is unreadable.
             }
           }());
         }
@@ -121,6 +129,24 @@ class BrowseController extends ChangeNotifier {
         );
         _historyLoaded = true;
         _persistHistory();
+      case _BrowseLayoutLoaded(:final layout):
+        // An explicit choice made while the preference loaded wins.
+        if (!_layoutChosen) _emit(_model.copyWith(layout: layout));
+      case BrowseLayoutChanged(:final layout):
+        // The first choice counts even when it is the layout on screen: it
+        // still outranks a saved one that is loading.
+        if (_layoutChosen && layout == _model.layout) return;
+        _layoutChosen = true;
+        if (layout != _model.layout) _emit(_model.copyWith(layout: layout));
+        if (_bridge case final CatalogHost host) {
+          unawaited(() async {
+            try {
+              await host.saveCatalogLayout(layout.name);
+            } catch (_) {
+              // The layout is a best-effort preference.
+            }
+          }());
+        }
       case BrowseSearchSubmitted():
         _rememberSearch();
       case BrowseChanged(:final criteria):
@@ -634,6 +660,10 @@ class BrowseController extends ChangeNotifier {
 /// Subject tags a phone details page shows before its "+N more" chip.
 const catalogPhoneSubjectLimit = 5;
 
+/// How larger screens lay out free books among mixed results: a cover shelf,
+/// or the rows the Free books scope and phones use, which show long titles.
+enum BrowseLayout { grid, list }
+
 final class BrowseModel {
   const BrowseModel({
     this.criteria = (
@@ -666,7 +696,9 @@ final class BrowseModel {
     this.optionsBusy = false,
     this.locationBusy = false,
     this.acquisition = const BrowseAcquisition(),
+    this.layout = BrowseLayout.grid,
   });
+  final BrowseLayout layout;
   final CatalogSaveOptions? saveOptions;
   final bool optionsBusy;
   final bool locationBusy;
@@ -717,6 +749,7 @@ final class BrowseModel {
     bool? optionsBusy,
     bool? locationBusy,
     BrowseAcquisition? acquisition,
+    BrowseLayout? layout,
   }) => BrowseModel(
     criteria: criteria ?? this.criteria,
     books: books == null ? this.books : List.unmodifiable(books),
@@ -747,6 +780,7 @@ final class BrowseModel {
     optionsBusy: optionsBusy ?? this.optionsBusy,
     locationBusy: locationBusy ?? this.locationBusy,
     acquisition: acquisition ?? this.acquisition,
+    layout: layout ?? this.layout,
   );
 }
 
@@ -777,6 +811,16 @@ final class BrowseOpened extends BrowseMessage {
 
 final class BrowseSearchSubmitted extends BrowseMessage {
   const BrowseSearchSubmitted();
+}
+
+final class BrowseLayoutChanged extends BrowseMessage {
+  const BrowseLayoutChanged(this.layout);
+  final BrowseLayout layout;
+}
+
+final class _BrowseLayoutLoaded extends BrowseMessage {
+  const _BrowseLayoutLoaded(this.layout);
+  final BrowseLayout layout;
 }
 
 final class _BrowseHistoryLoaded extends BrowseMessage {

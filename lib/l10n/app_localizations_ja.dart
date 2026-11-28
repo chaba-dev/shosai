@@ -1418,6 +1418,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get catalogAuthors => '著者';
 
   @override
+  String get catalogLayout => '無料の本の表示';
+
+  @override
+  String get catalogLayoutGrid => 'グリッド';
+
+  @override
+  String get catalogLayoutList => 'リスト';
+
+  @override
   String get catalogBrowse => '無料の本を探す';
 
   @override
