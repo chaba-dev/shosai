@@ -789,7 +789,10 @@ class _CatalogCover extends StatelessWidget {
       headers: const {'User-Agent': catalogUserAgent},
       fit: BoxFit.cover,
       errorBuilder: (_, _, _) => onFailure,
-      loadingBuilder: (_, child, loading) => loading == null ? child : fallback,
+      // The typographic cover shows until the first frame decodes, including
+      // before any bytes arrive, when loading progress is still null.
+      frameBuilder: (_, child, frame, synchronous) =>
+          synchronous || frame != null ? child : fallback,
     );
     final mirror =
         url != null &&
@@ -1185,6 +1188,7 @@ class _CatalogBookPage extends StatelessWidget {
                   phone: phone,
                 ),
               ],
+              _CatalogAboutBook(details),
             ],
           );
     return PopScope(
@@ -1389,6 +1393,103 @@ class _CatalogEyebrow extends StatelessWidget {
         japanese ? style : style.copyWith(letterSpacing: .88),
         label,
       ),
+    );
+  }
+}
+
+/// The book's long description and its facts, below the acquisition actions.
+/// Each part is omitted when the catalog lacks it, and the section with them.
+class _CatalogAboutBook extends StatelessWidget {
+  const _CatalogAboutBook(this.details);
+  final CatalogBookDetails details;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final palette = ShellPalette.of(context);
+    // SQLite's trim admits newlines and tabs, so blank values can arrive.
+    final series = [
+      for (final s in details.series)
+        if (s.name.trim() case final name when name.isNotEmpty)
+          s.position == null
+              ? name
+              : l10n.catalogSeriesPosition(name, s.position!),
+    ];
+    final facts = [
+      if (series.isNotEmpty) (l10n.catalogSeries, series.join('\n')),
+      if (details.wordCount case final words?)
+        (l10n.catalogLength, l10n.catalogWordCount(words)),
+      // The release date of a source's edition; never shown as a publication
+      // year. It is a calendar date, read as UTC so no time zone shifts its
+      // day.
+      if (details.released case final released?)
+        (
+          l10n.catalogReleased,
+          l10n.catalogReleasedOn(DateTime.parse('${released}T00:00:00Z')),
+        ),
+    ];
+    final description = switch (details.description?.trim()) {
+      final text? when text.isNotEmpty => text,
+      _ => null,
+    };
+    if (description == null && facts.isEmpty) return const SizedBox.shrink();
+    final value = shellInterfaceStyle(15, 24).copyWith(color: palette.ink);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: ShosaiTokens.space6),
+        Divider(height: 1, color: palette.line),
+        const SizedBox(height: ShosaiTokens.space5),
+        Semantics(
+          header: true,
+          child: Text(
+            l10n.catalogAboutBook,
+            style: shellEditorialStyle(22, 26),
+          ),
+        ),
+        if (description != null)
+          for (final paragraph in description.split(RegExp(r'\n\s*\n')))
+            if (paragraph.trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: ShosaiTokens.space3),
+                child: Text(
+                  paragraph.trim(),
+                  style: shellEditorialStyle(18, 28, weight: FontWeight.w400),
+                ),
+              ),
+        if (facts.isNotEmpty) ...[
+          const SizedBox(height: ShosaiTokens.space4),
+          Table(
+            columnWidths: const {
+              0: IntrinsicColumnWidth(),
+              1: FlexColumnWidth(),
+            },
+            children: [
+              for (final (label, text) in facts)
+                TableRow(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        end: ShosaiTokens.space5,
+                        bottom: ShosaiTokens.space1,
+                      ),
+                      child: Text(
+                        label,
+                        style: value.copyWith(color: palette.inkMuted),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        bottom: ShosaiTokens.space1,
+                      ),
+                      child: Text(text, style: value),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
