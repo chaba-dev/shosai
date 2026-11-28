@@ -116,9 +116,13 @@ void main() {
     var mirrorStatus = 200;
     var mirrorFinished = false;
     var id = 1342;
+    var requested = Completer<void>();
+    var respond = Completer<void>()..complete();
     final server = (await tester.runAsync(() async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server.listen((request) async {
+        if (!requested.isCompleted) requested.complete();
+        await respond.future;
         final path = request.uri.path;
         final primary =
             path == '/www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg';
@@ -147,13 +151,15 @@ void main() {
     debugNetworkImageHttpClientProvider = () => client;
     try {
       for (final scenario in [
-        (primary: 200, mirror: 200, width: 20),
-        (primary: 503, mirror: 200, width: 10),
-        (primary: 503, mirror: 503, width: null),
+        (primary: 200, mirror: 200, width: 20, pending: true),
+        (primary: 503, mirror: 200, width: 10, pending: false),
+        (primary: 503, mirror: 503, width: null, pending: false),
       ]) {
         primaryStatus = scenario.primary;
         mirrorStatus = scenario.mirror;
         mirrorFinished = false;
+        requested = Completer<void>();
+        if (scenario.pending) respond = Completer<void>();
         await tester.pumpWidget(
           productionShell(
             home: Scaffold(
@@ -186,6 +192,13 @@ void main() {
             ),
           ),
         );
+        if (scenario.pending) {
+          // Before the first byte arrives, the typographic cover stands in
+          // rather than an empty image.
+          await until(tester, () => requested.isCompleted);
+          expect(find.byType(ShellGeneratedCover), findsOneWidget);
+          respond.complete();
+        }
         if (scenario.width case final width?) {
           await until(
             tester,
