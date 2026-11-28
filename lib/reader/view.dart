@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/gestures.dart'
     show
         DoubleTapGestureRecognizer,
+        EagerGestureRecognizer,
         GestureBinding,
         PointerDownEvent,
         VelocityTracker,

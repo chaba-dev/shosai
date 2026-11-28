@@ -34,6 +34,7 @@ class _DocumentViewState extends State<_DocumentView> {
   final GlobalKey _overlayKey = GlobalKey(debugLabel: 'reader overlay');
   Rect? _selectionBounds;
   Rect _selectionTarget = Rect.zero;
+  List<Rect> _selectionHandles = const [];
 
   /// Bumped whenever the rendered content geometry changes — a scroll or a
   /// content resize — so the action overlay re-reads the transform that
@@ -417,6 +418,7 @@ class _DocumentViewState extends State<_DocumentView> {
                                 CustomSingleChildLayout(
                                   delegate: _SelectionActionsLayout(
                                     target: _selectionTarget,
+                                    handles: _selectionHandles,
                                     bounds:
                                         (_selectionBounds ??
                                                 (Offset.zero &
@@ -464,12 +466,46 @@ class _DocumentViewState extends State<_DocumentView> {
               model.selectionPhase != ReaderSelectionPhase.selected
           ? Rect.zero
           : _selectionActionsTarget(surface, model, overlay.size);
-      if (_selectionBounds != bounds || _selectionTarget != target) {
+      final handles = target == Rect.zero
+          ? const <Rect>[]
+          : _selectionHandleRects(overlay);
+      if (_selectionBounds != bounds ||
+          _selectionTarget != target ||
+          !listEquals(_selectionHandles, handles)) {
         _selectionBounds = bounds;
         _selectionTarget = target;
+        _selectionHandles = handles;
         _bumpContentGeometry();
       }
     });
+  }
+
+  /// The touch targets of the selection's handles in the overlay's space,
+  /// which the action surface keeps clear of.
+  List<Rect> _selectionHandleRects(RenderBox overlay) {
+    final content = _contentKey.currentContext;
+    if (content == null) return const [];
+    final covered = <Rect>[];
+    void visit(Element element) {
+      if (element.widget.key case ValueKey<String>(
+        value: 'reader-selection-handle-start' || 'reader-selection-handle-end',
+      )) {
+        final handle = element.renderObject;
+        if (handle is RenderBox && handle.hasSize) {
+          covered.add(
+            MatrixUtils.transformRect(
+              handle.getTransformTo(overlay),
+              Offset.zero & handle.size,
+            ),
+          );
+        }
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    content.visitChildElements(visit);
+    return covered;
   }
 
   /// The selected range's rect in the overlay's own coordinate space.

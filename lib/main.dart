@@ -71,6 +71,7 @@ export 'package:shosai_flutter/reader/controller.dart'
         ReaderSelectionCopyRequested,
         ReaderSelectionEnded,
         ReaderSelectionExtended,
+        ReaderSelectionHandleStarted,
         ReaderSelectionKeyboardExtended,
         ReaderSelectionMovement,
         ReaderSelectionNoteRequested,

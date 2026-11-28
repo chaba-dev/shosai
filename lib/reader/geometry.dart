@@ -30,6 +30,11 @@ class SurfaceTransform {
         : value;
   }
 
+  Offset toDestination(Offset point) => Offset(
+    destination.left + (point.dx - source.left) * scaleX,
+    destination.top + (point.dy - source.top) * scaleY,
+  );
+
   Rect toDestinationRect(Rect rect) => Rect.fromLTRB(
     destination.left + (rect.left - source.left) * scaleX,
     destination.top + (rect.top - source.top) * scaleY,
