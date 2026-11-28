@@ -1579,7 +1579,9 @@ class _ReaderContentPane extends StatelessWidget {
             child: _ReaderLayoutReporter(
               model: model,
               dispatch: dispatch,
-              child: model.busy
+              // A PDF open stays busy while its highlights load, but its first
+              // page shows as soon as it is decoded (RFD 16).
+              child: model.busy && (document == null || model.pageImage == null)
                   ? _ReaderOpeningView(
                       title:
                           document?.title ??

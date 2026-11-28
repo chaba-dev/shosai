@@ -377,6 +377,17 @@ final class ReaderController implements Listenable {
   final Set<int> _cancelledSelectionCreates = {};
   int _activeBridgeOperations = 0;
   int _annotationRevision = 0;
+
+  /// The document generation whose highlights have started loading, and that
+  /// load's cancellation while it runs (see [_loadDocumentAnnotations]).
+  int? _annotationLoadGeneration;
+  BigInt? _annotationLoadCancellation;
+
+  /// Whether a PDF typography relayout was asked for while a highlight write
+  /// was pending. It is replayed at the latest requested layout once the write
+  /// settles (see [_startRequestedRelayoutIfReady]); any relayout started in
+  /// the meantime supersedes it.
+  bool _pdfRelayoutDeferred = false;
   int _layoutRevision = 0;
   int _selectionRevision = 0;
 
@@ -1550,12 +1561,10 @@ final class ReaderController implements Listenable {
             scalar: message.scalar,
             layout: message.layout,
             height: message.height,
-            annotations: message.annotations,
             offset: message.offset,
             length: message.length,
             replaceReadingOffset: message.replaceReadingOffset,
             epubEdge: message.epubEdge,
-            annotationError: message.annotationError,
             session: message.session,
             sessionKey: message.sessionKey,
           );
@@ -1611,7 +1620,14 @@ final class ReaderController implements Listenable {
       case _ReaderAnnotationListFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _annotationRevision) {
-          _emit(_model.copyWith(annotationError: message.error));
+          // The highlights shown are kept, but they are no longer known to
+          // be the store's, so edits wait for a retry.
+          _emit(
+            _model.copyWith(
+              annotationError: message.error,
+              annotationsReady: false,
+            ),
+          );
         }
       case _ReaderAnnotationsChanged():
         _annotationsChanged(message);
@@ -1768,11 +1784,13 @@ final class ReaderController implements Listenable {
     for (final cancellation in _toolCancellations) {
       _bridge.cancel(id: cancellation);
     }
+    if (_annotationLoadCancellation case final load?) _bridge.cancel(id: load);
     _cancelContentsEffects();
     _layoutRevision += 1;
     _activeRelayoutIntent = null;
     final openLayout = _requestedLayout;
     _failedLayout = null;
+    _pdfRelayoutDeferred = false;
     _annotationRevision += 1;
     _releaseModelResources(publish: true);
     late final BigInt cancellation;
@@ -2166,6 +2184,31 @@ final class ReaderController implements Listenable {
           ),
         );
       }
+      final (rendered, rasterScale) = await _renderPdfPage(
+        pdf,
+        unit,
+        restoredLayout,
+        facing: facing,
+      );
+      if (!_isCurrent(generation)) return;
+      final image = await _decoder(
+        rendered.pixels,
+        width: rendered.width,
+        height: rendered.height,
+      );
+      if (!_isCurrent(generation)) {
+        image.dispose();
+        return;
+      }
+      dispatch(
+        _ReaderImageDecoded(
+          generation: generation,
+          pageImage: image,
+          rasterScale: rasterScale,
+        ),
+      );
+      // Highlights load after the first page paints (RFD 16); the open stays
+      // busy until they land, so its cancellation covers the list.
       final revision = _annotationRevision;
       try {
         final annotations = await _records.listAnnotations(
@@ -2194,30 +2237,6 @@ final class ReaderController implements Listenable {
           ),
         );
       }
-
-      final (rendered, rasterScale) = await _renderPdfPage(
-        pdf,
-        unit,
-        restoredLayout,
-        facing: facing,
-      );
-      if (!_isCurrent(generation)) return;
-      final image = await _decoder(
-        rendered.pixels,
-        width: rendered.width,
-        height: rendered.height,
-      );
-      if (!_isCurrent(generation)) {
-        image.dispose();
-        return;
-      }
-      dispatch(
-        _ReaderImageDecoded(
-          generation: generation,
-          pageImage: image,
-          rasterScale: rasterScale,
-        ),
-      );
     } catch (error) {
       dispatch(
         _ReaderOpenFailed(
@@ -2722,6 +2741,7 @@ final class ReaderController implements Listenable {
             ? _model.readingLocation.unit
             : _model.unit);
     _requestedLayout = layout;
+    _pdfRelayoutDeferred = false;
     if (document.format == FlutterBookFormat.epub) {
       // EPUB pages are paginated for the reported page height: before the
       // first report the layout waits, and the report starts it.
@@ -2889,7 +2909,6 @@ final class ReaderController implements Listenable {
       scalar: target,
       layout: layout,
       height: height,
-      annotations: _model.annotations,
       offset: target,
       replaceReadingOffset: true,
     );
@@ -2993,12 +3012,10 @@ final class ReaderController implements Listenable {
     required int scalar,
     required ReaderLayout layout,
     required double height,
-    required List<FlutterAnnotation> annotations,
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
     EpubPositionEdge epubEdge = EpubPositionEdge.startOrInterior,
-    String? annotationError,
     String? selectionError,
     ChapterLayoutSession? session,
     _EpubLayoutKey? sessionKey,
@@ -3071,8 +3088,7 @@ final class ReaderController implements Listenable {
               ? _model.locationRequestRevision + 1
               : _model.locationRequestRevision,
           selectionSurface: _freezeSurface(page.surface),
-          annotations: annotations,
-          savedSelections: _savedSelections(annotations, unit),
+          savedSelections: _savedSelections(_model.annotations, unit),
           anchor: offset ?? _model.anchor,
           focus: offset == null ? _model.focus : offset + (length ?? 0),
           selectionPhase: length == null
@@ -3080,10 +3096,8 @@ final class ReaderController implements Listenable {
               : ReaderSelectionPhase.selected,
           relayoutError: null,
           layoutRefusal: changedLocation ? null : _model.layoutRefusal,
-          annotationsReady: annotationError == null,
-          annotationError:
-              annotationError ??
-              (_model.annotationsReady ? _model.annotationError : null),
+          // Highlights arrive after the first page (see
+          // [_loadDocumentAnnotations]); a page paints the list the reader has.
           layout: layout,
           relayoutBusy: false,
           relayoutPending: false,
@@ -3109,6 +3123,7 @@ final class ReaderController implements Listenable {
     if (adopting && previousSession != null) {
       _retireEpubSession(previousSession);
     }
+    _loadDocumentAnnotations();
     if (page.continuous) _scheduleContinuousTick();
     if (length != null) {
       _frameScheduler(
@@ -3800,15 +3815,25 @@ final class ReaderController implements Listenable {
             !themeChanged)) {
       return;
     }
+    final relayout = ReaderLayout(
+      scale: after.rasterZoom,
+      width: _requestedLayout.width,
+      fontSize: after.epubFontSize,
+      lineSpacing: after.epubLineSpacing,
+      spread: _requestedLayout.spread,
+    );
+    // A PDF relayout lists the page's highlights; listed while a write is
+    // pending, the list could predate the write and bring back what it
+    // removed, so the relayout waits for the write instead.
+    if (document.format == FlutterBookFormat.pdf &&
+        _model.annotationOperations.isNotEmpty) {
+      _requestedLayout = relayout;
+      _pdfRelayoutDeferred = true;
+      return;
+    }
     _startRelayout(
       document,
-      ReaderLayout(
-        scale: after.rasterZoom,
-        width: _requestedLayout.width,
-        fontSize: after.epubFontSize,
-        lineSpacing: after.epubLineSpacing,
-        spread: _requestedLayout.spread,
-      ),
+      relayout,
       unit: _model.readingLocation.unit,
       offset: document.format == FlutterBookFormat.pdf
           ? null
@@ -4523,19 +4548,6 @@ final class ReaderController implements Listenable {
           if (progressed == 0) break;
         }
       }
-      List<FlutterAnnotation> annotations = const [];
-      String? annotationError;
-      try {
-        annotations = await _records.listAnnotations(
-          document: document,
-          text: _readerText(document, cancellation),
-          scale: layout.scale,
-          cancellationId: cancellation,
-        );
-      } catch (error) {
-        annotationError = _describeError(error);
-      }
-      if (!_isCurrentLayout(generation, revision)) return;
       // The page is installed once, from the window around the requested
       // location. The remaining batches only *measure*: republishing on every
       // batch would overwrite a page turn, a selection or an annotation
@@ -4551,12 +4563,10 @@ final class ReaderController implements Listenable {
             scalar: target,
             layout: layout,
             height: pageHeight,
-            annotations: annotations,
             offset: offset,
             length: length,
             replaceReadingOffset: replaceReadingOffset,
             epubEdge: epubEdge,
-            annotationError: annotationError,
             session: replacement,
             sessionKey: replacement == null ? null : key,
           ),
@@ -4587,6 +4597,80 @@ final class ReaderController implements Listenable {
         replacement.dispose();
       }
     }
+  }
+
+  /// Starts loading an EPUB's highlights once its first page shows.
+  ///
+  /// The load belongs to the document, not to a layout (RFD 16):
+  /// the page does not wait for it, and a relayout or page turn neither waits
+  /// for nor cancels it. Highlight edits stay disabled until it lands, so the
+  /// list it installs cannot hide one. Its result is dropped when the document
+  /// is replaced or another list was installed first. (A PDF lists its
+  /// highlights inside its open, after the first page decodes.)
+  void _loadDocumentAnnotations() {
+    final document = _model.document;
+    final generation = _model.generation;
+    if (document == null ||
+        _annotationLoadGeneration == generation ||
+        _model.annotationsReady ||
+        _closing) {
+      return;
+    }
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(annotationError: _describeError(error)));
+      return;
+    }
+    _annotationLoadGeneration = generation;
+    _annotationLoadCancellation = cancellation;
+    _annotationCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    final revision = _annotationRevision;
+    final scale = _model.layout.scale;
+    bool current() => _isCurrent(generation) && !_model.annotationsReady;
+    unawaited(() async {
+      ReaderMessage? result;
+      try {
+        final annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation),
+          scale: scale,
+          cancellationId: cancellation,
+        );
+        if (current()) {
+          result = _ReaderAnnotationsChanged(
+            generation,
+            revision,
+            null,
+            null,
+            annotations,
+          );
+        }
+      } catch (error) {
+        if (current()) {
+          result = _ReaderAnnotationListFailed(
+            generation,
+            revision,
+            _describeError(error),
+          );
+        }
+      }
+      if (identical(_annotationLoadCancellation, cancellation)) {
+        _annotationLoadCancellation = null;
+      }
+      if (_annotationCancellations.remove(cancellation)) {
+        try {
+          if (result != null) dispatch(result);
+        } finally {
+          // The token and the operation count are released even when the
+          // transition the result drives throws.
+          _bridge.releaseCancellation(id: cancellation);
+          dispatch(const _ReaderAnnotationOperationFinished());
+        }
+      }
+    }());
   }
 
   /// The open [document]'s text for annotations and book search: PDF pages
@@ -6541,6 +6625,12 @@ final class ReaderController implements Listenable {
       return;
     }
     if (message.items case final items?) {
+      // A loaded list replaces a failed one, and clears that list's failure.
+      if (operation == null &&
+          !_model.annotationsReady &&
+          _model.annotationError != null) {
+        _emit(_model.copyWith(annotationError: null));
+      }
       _setAnnotations(
         items,
         annotationsReady:
@@ -6601,6 +6691,7 @@ final class ReaderController implements Listenable {
       return;
     }
     if (_model.columnsPresentation) {
+      _pdfRelayoutDeferred = false;
       if (_model.pdfColumns == null || _requestedLayout != _model.layout) {
         _refreshColumns();
       }
@@ -6614,6 +6705,14 @@ final class ReaderController implements Listenable {
           _epubHeightNeedsLayout(document, _requestedLayout, height)) {
         _startRelayout(document, _requestedLayout, height: height);
       }
+      return;
+    }
+    if (_pdfRelayoutDeferred && document.format == FlutterBookFormat.pdf) {
+      _startRelayout(
+        document,
+        _requestedLayout,
+        unit: _model.readingLocation.unit,
+      );
       return;
     }
     if (_requestedLayout != _model.layout &&

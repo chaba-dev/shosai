@@ -1139,12 +1139,10 @@ final class _ReaderEpubPageLoaded extends ReaderMessage {
     required this.scalar,
     required this.layout,
     required this.height,
-    required this.annotations,
     required this.replaceReadingOffset,
     required this.epubEdge,
     this.offset,
     this.length,
-    this.annotationError,
     this.session,
     this.sessionKey,
   });
@@ -1156,12 +1154,10 @@ final class _ReaderEpubPageLoaded extends ReaderMessage {
   final int scalar;
   final ReaderLayout layout;
   final double height;
-  final List<FlutterAnnotation> annotations;
   final bool replaceReadingOffset;
   final EpubPositionEdge epubEdge;
   final int? offset;
   final int? length;
-  final String? annotationError;
 
   /// The replacement chapter session this page was measured from, when the
   /// relayout built one. The handler adopts it together with the page; a page

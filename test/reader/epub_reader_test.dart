@@ -90,6 +90,15 @@ void main() {
     return null;
   }
 
+  /// The saved highlights the page paints, as canonical ranges.
+  List<(int, int)> painted(WidgetTester tester) => [
+    for (final paint in tester.widgetList<CustomPaint>(
+      find.byType(CustomPaint),
+    ))
+      if (paint.painter case final PagePainter painter)
+        for (final saved in painter.savedSelections) (saved.start, saved.end),
+  ];
+
   /// Pumps until the installed Dart page stops changing size.
   ///
   /// Opening a document reports its content box twice (the opening body, then
@@ -293,15 +302,63 @@ void main() {
     await _drainHarness(tester);
   });
 
-  testWidgets('a superseding relayout keeps the painted session alive', (
+  testWidgets('the first page paints before its highlights load', (
     tester,
   ) async {
-    // The relayout that installs a page owns its session until the page is
-    // accepted. A second relayout that starts while the first is still waiting
-    // must not dispose the session the model is still painting, and must
-    // release its own replacement when a third supersedes it.
+    // RFD 16 keeps annotation loading off the open's critical path: the page
+    // shows while the store is still resolving the book's highlights, and the
+    // highlights paint on that same page when they arrive.
+    final harness = bridge();
+    final highlights = Completer<List<FlutterAnnotation>>();
+    harness.annotationListCompleters.add(highlights);
+    await openReader(tester, harness);
+    await settleEpubPage(tester);
+
+    final page = dartPage(tester)!.page;
+    expect(
+      harness.annotationListCompleters,
+      isEmpty,
+      reason: 'the open asked for the highlights',
+    );
+    expect(painted(tester), isEmpty, reason: 'none have arrived yet');
+
+    final start = page.canonicalStart + 2;
+    highlights.complete([
+      FlutterAnnotation(
+        id: 'saved',
+        unit: BigInt.from(page.unit),
+        resolution: FlutterAnnotationResolution.exact,
+        textRange: FlutterAnnotationTextRange(
+          start: BigInt.from(start),
+          end: BigInt.from(start + 6),
+        ),
+        color: FlutterHighlightColor.green,
+      ),
+    ]);
+    await settleNative(tester);
+
+    expect(painted(tester), [(start, start + 6)]);
+    expect(
+      dartPage(tester)!.page.canonicalStart,
+      page.canonicalStart,
+      reason: 'the highlights paint on the page already shown',
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await _drainHarness(tester);
+  });
+
+  testWidgets('resizes while highlights load keep them and retire sessions', (
+    tester,
+  ) async {
+    // The book's highlights load once, for the document: relayouts that
+    // supersede one another while the list is pending (a resize and its undo)
+    // neither cancel it nor drop its result, and each replaced page's session
+    // is retired with it while the installed one stays live.
     final sessions = <ChapterLayoutSession>[];
     final harness = bridge();
+    final held = Completer<List<FlutterAnnotation>>();
+    harness.annotationListCompleters.add(held);
     await renderHarnessState(
       tester,
       productionShell(
@@ -317,85 +374,56 @@ void main() {
       maxRounds: 16,
     );
     await settleEpubPage(tester);
-    final painted = dartPage(tester);
-    expect(painted, isNotNull);
-    expect(sessions, isNotEmpty, reason: 'the open built its session');
-    final openSession = sessions.last;
-    expect(
-      openSession.isDisposed,
-      isFalse,
-      reason: 'the painted session is live',
-    );
-
-    // Hold the second relayout between its session creation and its page
-    // installation, then supersede it with a third.
-    final held = Completer<List<FlutterAnnotation>>();
-    harness.annotationListCompleters.add(held);
-    tester.view.physicalSize = const Size(1400, 2200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    await pumpHarnessFrames(tester, frames: 8);
-    await settleNative(tester);
     expect(
       harness.annotationListCompleters,
       isEmpty,
-      reason: 'the second relayout is held',
+      reason: 'the highlights are loading',
     );
-    expect(sessions.length, greaterThanOrEqualTo(2));
-    final heldSession = sessions.last;
+    final page = dartPage(tester)!.page;
+    final openSession = sessions.last;
+    expect(openSession.isDisposed, isFalse);
 
-    tester.view.physicalSize = const Size(1500, 2300);
+    final original = tester.view.physicalSize;
+    final ratio = tester.view.devicePixelRatio;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    tester.view.devicePixelRatio = ratio;
+    tester.view.physicalSize = original + const Offset(150, 0);
+    await pumpHarnessFrames(tester, frames: 2);
+    tester.view.physicalSize = original;
     await pumpHarnessFrames(tester, frames: 8);
-    await settleNative(tester);
-
-    // The superseded relayout is still waiting for its annotations, so its
-    // session is neither adopted nor released yet, and the page the model paints
-    // is still alive.
+    await settleEpubPage(tester);
     expect(tester.takeException(), isNull);
-    expect(dartPage(tester), isNotNull);
-    expect(
-      heldSession.isDisposed,
-      isFalse,
-      reason: 'a pending replacement is not released under the painted page',
-    );
-    expect(
-      openSession.isDisposed,
-      isTrue,
-      reason: 'the session whose page was replaced is retired',
-    );
-
-    // Releasing the held call resumes the superseded effect, which finds its
-    // operation invalidated and releases the replacement it built.
-    held.complete(const []);
-    await pumpHarnessFrames(tester, frames: 8);
-    await settleNative(tester);
-    expect(
-      heldSession.isDisposed,
-      isTrue,
-      reason: 'the losing replacement is released by its effect',
-    );
-
-    expect(tester.takeException(), isNull);
-    final settled = dartPage(tester);
-    expect(settled, isNotNull, reason: 'the superseding relayout installed');
-    expect(
-      settled!.page.box.size.height,
-      isNot(painted!.page.box.size.height),
-      reason: 'the installed page follows the last reported box',
-    );
+    expect(sessions.length, greaterThan(1), reason: 'the resize relaid out');
     final installedSession = sessions.last;
-    expect(
-      identical(installedSession, heldSession),
-      isFalse,
-      reason: 'the superseding relayout built its own session',
-    );
     expect(installedSession.isDisposed, isFalse);
     expect(
-      openSession.isDisposed,
-      isTrue,
-      reason: 'the replaced session is retired once its page leaves the screen',
+      sessions.where((session) => !session.isDisposed),
+      [installedSession],
+      reason: 'every replaced session is retired',
     );
+
+    final start = page.canonicalStart + 2;
+    held.complete([
+      FlutterAnnotation(
+        id: 'saved',
+        unit: BigInt.from(page.unit),
+        resolution: FlutterAnnotationResolution.exact,
+        textRange: FlutterAnnotationTextRange(
+          start: BigInt.from(start),
+          end: BigInt.from(start + 6),
+        ),
+        color: FlutterHighlightColor.green,
+      ),
+    ]);
+    await settleNative(tester);
+    expect(tester.takeException(), isNull);
+    expect(
+      painted(tester),
+      [(start, start + 6)],
+      reason: "the document's list survives the superseded relayouts",
+    );
+    expect(installedSession.isDisposed, isFalse);
 
     await tester.pumpWidget(const SizedBox());
     await _drainHarness(tester);
