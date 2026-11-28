@@ -789,7 +789,10 @@ class _CatalogCover extends StatelessWidget {
       headers: const {'User-Agent': catalogUserAgent},
       fit: BoxFit.cover,
       errorBuilder: (_, _, _) => onFailure,
-      loadingBuilder: (_, child, loading) => loading == null ? child : fallback,
+      // The typographic cover shows until the first frame decodes, including
+      // before any bytes arrive, when loading progress is still null.
+      frameBuilder: (_, child, frame, synchronous) =>
+          synchronous || frame != null ? child : fallback,
     );
     final mirror =
         url != null &&
