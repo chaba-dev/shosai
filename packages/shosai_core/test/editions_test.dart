@@ -788,4 +788,57 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'an edition member with an unknown fingerprint hides only its own notes',
+    () async {
+      final epub = await book(edition: null, identifiers: ['9780306406157']);
+      final pdf = await book(
+        format: 'pdf',
+        edition: null,
+        identifiers: ['urn:isbn:9780306406157'],
+      );
+      final other = await book(
+        title: 'Independent',
+        author: 'Someone else',
+        identifiers: ['9780140449136'],
+      );
+      final annotations = Annotations(t.store);
+      for (final (bookId, body) in [
+        (epub.id, 'EPUB note'),
+        (pdf.id, 'PDF note'),
+        (other.id, 'Other note'),
+      ]) {
+        await annotations.createNote(bookId, const BookAnchor(), body);
+      }
+      final grouped = await shelf.page(sources: []);
+      expect(grouped.editions.where((e) => e.files.length == 2), hasLength(1));
+      // As a later Shōsai might save the PDF's; this schema refuses to write it.
+      await t.store.transaction((db) {
+        db.execute('PRAGMA ignore_check_constraints = ON');
+        db.execute(
+          '''UPDATE annotation_document_versions SET fingerprint_version = 2
+           WHERE content_hash = ?''',
+          [pdf.contentHash],
+        );
+        db.execute('PRAGMA ignore_check_constraints = OFF');
+      });
+
+      // Read while the two files are still one edition.
+      final notes = (await annotations.libraryNotes()).books;
+      expect(
+        {for (final book in notes) ...book.notes.map((n) => n.body)},
+        {'EPUB note', 'Other note'},
+      );
+      final found = await shelf.page(sources: [], query: 'Independent');
+      expect(found.editions.expand((e) => e.files).map((f) => f.book!.id), [
+        other.id,
+      ]);
+      expect(await shelf.page(sources: []), isA<EditionPage>());
+      await expectLater(
+        annotations.summary(pdf.id),
+        throwsCoreError(CoreErrorKind.unsupported),
+      );
+    },
+  );
 }

@@ -12,6 +12,14 @@ import 'resolution.dart';
 /// Anchor format version of every stored annotation.
 const anchorVersion = 1;
 
+/// Algorithm of the content fingerprint each annotated version records with
+/// its content hash (RFD 16, anchor contract version 1).
+const fingerprintAlgorithm = 'sha256';
+
+/// Version of the content fingerprint: [fingerprintAlgorithm] of the file's
+/// whole bytes, as lowercase hexadecimal.
+const fingerprintVersion = 1;
+
 /// Longest annotation body, in Unicode scalars.
 const maxAnnotationBodyScalars = 65536;
 
