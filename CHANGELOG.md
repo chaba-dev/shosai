@@ -92,6 +92,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Name the source of a book's release date (#368)
 - *(catalog)* Cap phone subject tags and give book facts their own line (#370)
 - *(reader)* Add draggable selection handles on touch (#373)
+- *(catalog)* Switch free-book results between grid and list (#376)
 
 ### 🐛 Bug Fixes
 
