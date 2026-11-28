@@ -5,6 +5,7 @@ import 'dart:ui' show SemanticsAction, Tristate, instantiateImageCodec;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -1421,6 +1422,115 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets('desktop shelf cards keep a title\'s volume line', (
+    tester,
+  ) async {
+    const HarnessView(size: Size(1280, 900)).apply(tester);
+    final controller = BrowseController(
+      bridge: CatalogHarnessBridge(catalog),
+      openLink: (_) async {},
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (_, _) => ShellBrowsePage(
+              layout: ShellLayout.desktop,
+              model: controller.model,
+              local: controller.local.model,
+              dispatch: controller.dispatch,
+              onChosen: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    controller.dispatch(const BrowseOpened());
+    final c = controller.model.criteria;
+    controller.dispatch(
+      BrowseChanged((
+        query: 'tales',
+        filter: c.filter,
+        category: null,
+        language: null,
+        source: null,
+        author: null,
+      )),
+    );
+    await until(
+      tester,
+      () =>
+          controller.model.books.length == 1 &&
+          !controller.model.busy &&
+          !controller.model.refreshing,
+    );
+    // A two-line title and its volume line all show on the cover shelf.
+    // The generated cover repeats the title; the caption is the 14 px one.
+    final title = find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          widget.data == 'A study of stories and tales\nVolume 2' &&
+          widget.style?.fontSize == 14,
+    );
+    expect(title, findsOneWidget);
+    final paragraph = tester.renderObject<RenderParagraph>(title);
+    expect(paragraph.didExceedMaxLines, isFalse);
+    expect(paragraph.size.height, greaterThan(2 * 19));
+
+    // A title too long for three lines keeps its volume on the last line.
+    controller.dispatch(
+      BrowseChanged((
+        query: 'navigations',
+        filter: c.filter,
+        category: null,
+        language: null,
+        source: null,
+        author: null,
+      )),
+    );
+    await until(
+      tester,
+      () =>
+          controller.model.books.length == 1 &&
+          controller.model.books.single.id == '3' &&
+          !controller.model.busy,
+    );
+    Finder caption(String text) => find.byWidgetPredicate(
+      (widget) =>
+          widget is Text && widget.data == text && widget.style?.fontSize == 14,
+    );
+    expect(caption('Volume 3'), findsOneWidget);
+    expect(
+      tester
+          .renderObject<RenderParagraph>(caption('Volume 3'))
+          .didExceedMaxLines,
+      isFalse,
+    );
+    expect(
+      caption(
+        'The principal navigations, voyages, traffiques and discoveries '
+        'of the English nation',
+      ),
+      findsOneWidget,
+    );
+    // Assistive technology hears the whole title once, not its two parts.
+    expect(
+      find.bySemanticsLabel(
+        RegExp(r'^The principal navigations.*English nation — Volume 3\n'),
+      ),
+      findsOneWidget,
+    );
+
+    // Smaller text shrinks the shelf with its captions and nothing overflows.
+    tester.platformDispatcher.textScaleFactorTestValue = 0.9;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpAndSettle();
+    expect(caption('Volume 3'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'Search navigation queries the local catalog and selects edition rights',

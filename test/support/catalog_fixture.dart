@@ -39,6 +39,13 @@ CatalogClient createCatalogFixture(
           ? 'Pride and Prejudice'
           : i == 1
           ? '吾輩は猫である'
+          : i == 2
+          // A subtitle line, as Gutenberg's titles carry volumes.
+          ? 'A study of stories and tales\nVolume 2'
+          // Too long for three lines on a shelf card, as many sets are.
+          : i == 3
+          ? 'The principal navigations, voyages, traffiques and discoveries '
+                'of the English nation — Volume 3'
           : 'A study of stories — Volume $i';
       db.execute('INSERT INTO books VALUES (?, ?)', [id, title]);
       db.execute('INSERT INTO book_authors VALUES (?, ?, 0)', [
