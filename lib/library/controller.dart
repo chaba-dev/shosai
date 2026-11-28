@@ -685,6 +685,7 @@ class LibraryController implements Listenable {
       LibraryImportSelection(
         paths: paths,
         managed: true,
+        handed: true,
         cleanup: () => _openedDocuments!.discard(paths),
         openSingleBook: true,
       ),
@@ -1096,11 +1097,16 @@ class LibraryController implements Listenable {
           terminalStatus = _importReportStatus(report, l10n);
           successNotice = _importSuccessNotice(report);
         } else {
-          final report = await _records.importPaths(
-            pathKeys: selection.paths,
-            managed: selection.managed,
-            cancellationId: cancellation,
-          );
+          final report = selection.handed
+              ? await _records.saveHandedBooks(
+                  pathKeys: selection.paths,
+                  cancellationId: cancellation,
+                )
+              : await _records.importPaths(
+                  pathKeys: selection.paths,
+                  managed: selection.managed,
+                  cancellationId: cancellation,
+                );
           items = report.items;
           refresh = report.imported > BigInt.zero;
           terminalStatus = _importReportStatus(report, l10n);

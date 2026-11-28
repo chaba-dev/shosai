@@ -81,6 +81,15 @@ abstract interface class ShosaiRecords {
     required BigInt cancellationId,
   });
 
+  /// Copy books handed to Shōsai (Choose files on a phone or tablet, or a
+  /// file another app opened in Shōsai) to the _Save new books to_ location,
+  /// each under its [names] entry or else its own file name.
+  Future<FlutterImportReport> saveHandedBooks({
+    required List<String> pathKeys,
+    List<String>? names,
+    required BigInt cancellationId,
+  });
+
   Future<FlutterImportReport> importDirectory({
     required String pathKey,
     required bool managed,

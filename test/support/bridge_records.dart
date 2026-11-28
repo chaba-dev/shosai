@@ -249,6 +249,18 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     cancellationId: cancellationId,
   );
 
+  /// A bridge has no save location: handed books are copied in privately.
+  @override
+  Future<FlutterImportReport> saveHandedBooks({
+    required List<String> pathKeys,
+    List<String>? names,
+    required BigInt cancellationId,
+  }) => bridge.importPaths(
+    pathKeys: pathKeys,
+    managed: true,
+    cancellationId: cancellationId,
+  );
+
   @override
   Future<FlutterImportReport> importDirectory({
     required String pathKey,
