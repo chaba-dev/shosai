@@ -152,7 +152,9 @@ class _ChromeBridge extends HarnessBridge {
     required FlutterDocumentHandle document,
     required double scale,
     required BigInt cancellationId,
-  }) async => annotations;
+  }) async => annotationListCompleters.isNotEmpty
+      ? annotationListCompleters.removeAt(0).future
+      : annotations;
 
   @override
   Future<List<FlutterSearchMatch>> searchDocument({
@@ -832,6 +834,53 @@ void main() {
         );
       },
     );
+
+    testWidgets('a PDF page shows before its highlights load', (tester) async {
+      // RFD 16: the open does not wait for the store to resolve highlights.
+      _setView(tester, const Size(390, 800));
+      final bridge = _ChromeBridge();
+      final highlights = Completer<List<FlutterAnnotation>>();
+      bridge.annotationListCompleters.add(highlights);
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+      );
+      expect(bridge.annotationListCompleters, isEmpty);
+      expect(find.byKey(const ValueKey('reader-opening')), findsNothing);
+      expect(harnessReaderPageReady(tester), isTrue);
+      expect(_pagePainter(tester).savedSelections, isEmpty);
+      // The store holds the highlight, so a later relayout lists it too.
+      bridge.annotations = [
+        FlutterAnnotation(
+          id: 'saved',
+          unit: BigInt.zero,
+          resolution: FlutterAnnotationResolution.exact,
+          textRange: FlutterAnnotationTextRange(
+            start: BigInt.one,
+            end: BigInt.from(4),
+          ),
+          color: FlutterHighlightColor.green,
+        ),
+      ];
+      highlights.complete(bridge.annotations);
+      for (
+        var frame = 0;
+        frame < 20 && _pagePainter(tester).savedSelections.isEmpty;
+        frame++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+        await tester.pump(const Duration(milliseconds: 5));
+      }
+      expect(
+        _pagePainter(
+          tester,
+        ).savedSelections.map((saved) => (saved.start, saved.end)),
+        [(1, 4)],
+      );
+      await tester.pumpAndSettle();
+    });
 
     testWidgets('a PDF turn-zone tap waits for a possible Columns double tap', (
       tester,
@@ -2358,6 +2407,64 @@ void main() {
       editors.single.complete('late note');
       await pumpEventQueue();
       expect(controller.model.modalEffect, isNull);
+    },
+  );
+
+  test(
+    'a throwing highlight transition still releases the EPUB load',
+    () async {
+      final bridge = _ChromeBridge();
+      final highlights = Completer<List<FlutterAnnotation>>();
+      bridge.annotationListCompleters.add(highlights);
+      final errors = <Object>[];
+      late ReaderController controller;
+      await runZonedGuarded(() async {
+        controller = ReaderController(
+          bridge: bridge,
+          decoder: (pixels, {required int width, required int height}) async =>
+              _testImage(),
+          // Deriving the model the loaded list drives throws.
+          progressSource: (model) => model.annotations.isNotEmpty
+              ? throw StateError('progress failed')
+              : const ReaderProgressPresentation(kind: ReaderProgressKind.none),
+        );
+        controller.dispatch(
+          const ReaderOpenRequested('/books/slow-rivers.epub'),
+        );
+        await pumpEventQueue();
+        controller.dispatch(
+          const ReaderViewportChanged(
+            ReaderLayout(scale: 1, width: 600, fontSize: 18),
+            height: 800,
+          ),
+        );
+        for (
+          var i = 0;
+          i < 200 && bridge.annotationListCompleters.isNotEmpty;
+          i++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 2));
+        }
+        expect(bridge.annotationListCompleters, isEmpty);
+        highlights.complete([
+          FlutterAnnotation(
+            id: 'saved',
+            unit: BigInt.zero,
+            resolution: FlutterAnnotationResolution.exact,
+            textRange: FlutterAnnotationTextRange(
+              start: BigInt.one,
+              end: BigInt.from(3),
+            ),
+            color: FlutterHighlightColor.green,
+          ),
+        ]);
+        await pumpEventQueue();
+      }, (error, _) => errors.add(error));
+
+      expect(errors.whereType<StateError>(), isNotEmpty);
+      controller.dispose();
+      await pumpEventQueue();
+      expect(bridge.isDisposed, isTrue, reason: 'the load released its token');
     },
   );
 

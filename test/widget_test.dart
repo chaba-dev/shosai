@@ -15,6 +15,8 @@ import 'package:shosai_flutter/main.dart';
 import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderTypographyChanged;
 import 'support/bridge_pdf_engine.dart';
 import 'support/bridge_records.dart';
 import 'support/production_shell_harness.dart'
@@ -638,8 +640,10 @@ void main() {
     expect(transitions[0].busy, isTrue);
     expect(transitions[1].document?.handle, _documentHandle);
     expect(transitions[2].selectionSurface?.text, 'Selectable fixture text');
-    expect(transitions[3].annotationsReady, isTrue);
-    expect(transitions[4].pageImage, isNotNull);
+    // The page paints before its highlights load (RFD 16).
+    expect(transitions[3].pageImage, isNotNull);
+    expect(transitions[3].annotationsReady, isFalse);
+    expect(transitions[4].annotationsReady, isTrue);
     expect(transitions[5].busy, isFalse);
 
     controller.dispose();
@@ -2079,6 +2083,90 @@ void main() {
       await bridge.disposed.future;
     },
   );
+
+  test('a PDF zoom during a highlight delete cannot bring it back', () async {
+    final bridge = _ControlledBridge(
+      initialAnnotations: [_annotation('one')],
+      immediateLists: true,
+    );
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/a.pdf');
+    expect(controller.model.annotations.single.id, 'one');
+
+    bridge.deleteCompleter = Completer<bool>();
+    controller.dispatch(const ReaderAnnotationDeleted('one'));
+    final held = Completer<List<FlutterAnnotation>>();
+    bridge.listCompleters.add(held);
+    final listsBefore = bridge.listCalls;
+    controller.dispatch(const ReaderTypographyChanged(zoom: 2));
+    await Future<void>.delayed(Duration.zero);
+    // The view reports a new box while the zoom waits: the zoom lands at the
+    // latest layout, not the one it was asked at.
+    final shown = controller.model.layout;
+    controller.dispatch(
+      ReaderLayoutChanged(
+        ReaderLayout(
+          scale: 2,
+          width: 990,
+          fontSize: shown.fontSize,
+          lineSpacing: shown.lineSpacing,
+          spread: true,
+        ),
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    // A list asked for now is the store's view before the delete lands.
+    final listedBeforeDelete = bridge.listCalls > listsBefore;
+
+    bridge.deleteCompleter!.complete(true);
+    await _waitUntil(() => controller.model.annotationOperations.isEmpty);
+    await _waitUntil(() => bridge.listCalls > listsBefore);
+    held.complete(listedBeforeDelete ? [_annotation('one')] : const []);
+    await _waitUntil(
+      () =>
+          controller.model.layout.scale == 2 && !controller.model.relayoutBusy,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      listedBeforeDelete,
+      isFalse,
+      reason: 'the zoom waits for the delete',
+    );
+    expect(controller.model.annotations, isEmpty);
+    expect(controller.model.layout.width, 990);
+    expect(controller.model.layout.spread, isTrue);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('a PDF paints its first page before its highlights load', () async {
+    // RFD 16 keeps annotation loading off the open's critical path.
+    final highlights = Completer<List<FlutterAnnotation>>();
+    final bridge = _ControlledBridge(initialListCompleter: highlights);
+    final controller = _epubController(bridge);
+    controller.dispatch(const ReaderOpenRequested('/tmp/a.pdf'));
+    await _waitUntil(() => bridge.listCalls == 1);
+
+    expect(controller.model.pageImage, isNotNull);
+    expect(controller.model.selectionSurface, isNotNull);
+    expect(controller.model.contentState, ReaderContentState.ready);
+    expect(controller.model.annotationsReady, isFalse);
+    expect(controller.model.savedSelections, isEmpty);
+    final page = controller.model.pageImage;
+
+    highlights.complete([_annotation('saved')]);
+    await bridge.waitForOp(1);
+    expect(controller.model.annotationsReady, isTrue);
+    expect(controller.model.annotations.single.id, 'saved');
+    expect(
+      controller.model.savedSelections.map((saved) => (saved.start, saved.end)),
+      [(1, 3)],
+    );
+    expect(controller.model.pageImage, same(page));
+    controller.dispose();
+    await bridge.disposed.future;
+  });
 
   for (final createFails in [false, true]) {
     test(
@@ -3669,31 +3757,27 @@ void main() {
       format: FlutterBookFormat.pdf,
       initialAnnotations: [_annotation('one')],
     );
-    final decoded = Completer<ui.Image>();
-    final decodeStarted = Completer<void>();
-    final controller = ReaderController(
-      bridge: bridge,
-      decoder: (pixels, {required width, required height}) {
-        decodeStarted.complete();
-        return decoded.future;
-      },
-    );
+    final controller = _epubController(bridge);
+    // The open reports its highlights last: the reader closes the moment
+    // they are ready, while the open still owns the bridge.
+    var closedWhileOpening = false;
+    controller.addListener(() {
+      final model = controller.model;
+      if (closedWhileOpening || !model.annotationsReady) return;
+      closedWhileOpening = true;
+      expect(model.busy, isTrue);
+      expect(model.annotationOperations, isEmpty);
+      controller.dispose();
+      controller.dispatch(
+        const ReaderAnnotationUpdated('one', FlutterHighlightColor.green, null),
+      );
+      controller.dispatch(const ReaderAnnotationDeleted('one'));
+    });
     controller.dispatch(const ReaderOpenRequested('/tmp/a.pdf'));
-    await decodeStarted.future;
-    expect(controller.model.document, isNotNull);
-    expect(controller.model.annotationsReady, isTrue);
-    expect(controller.model.annotationOperations, isEmpty);
-
-    controller.dispose();
-    controller.dispatch(
-      const ReaderAnnotationUpdated('one', FlutterHighlightColor.green, null),
-    );
-    controller.dispatch(const ReaderAnnotationDeleted('one'));
+    await bridge.disposed.future;
+    expect(closedWhileOpening, isTrue);
     expect(bridge.updateCalls, 0);
     expect(bridge.deleteCalls, 0);
-
-    decoded.complete(await _testImage());
-    await bridge.disposed.future;
   });
 
   for (final operation in ['update', 'delete']) {
