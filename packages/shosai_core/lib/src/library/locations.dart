@@ -67,11 +67,14 @@ final class LibraryLocations {
   );
 
   /// Metadata is stored per file, not in a size-limited preference value.
+  /// A file that may be removed content stays out until [hideRemovedCopies]
+  /// has read it.
   Future<List<({String locationId, LocationEntry entry})>>
   catalog() => _store.read(
     (db) => [
       for (final row in db.select(
-        'SELECT location_id, locator_key, name, size, revision, folder_name FROM library_source_files',
+        '''SELECT location_id, locator_key, name, size, revision, folder_name
+           FROM library_source_files f WHERE NOT ($_unreadRemovedSuspect)''',
       ))
         (
           locationId: row.columnAt(0) as String,
@@ -336,7 +339,9 @@ final class LibraryLocations {
 
   /// Offer a hidden file on the shelf again. It is a candidate like a newly
   /// discovered file: opening it reads the bytes and brings the book, and the
-  /// notes its content kept, back.
+  /// notes its content kept, back. Only this file is offered, while it holds
+  /// that content at this key: its other copies, and this one moved, stay
+  /// hidden until the content is in the library again.
   Future<void> unhide(BookLocator locator) => _store.transaction((db) {
     final row = db
         .select(
@@ -349,8 +354,16 @@ final class LibraryLocations {
       throw const CoreException.notFound('The file is not hidden.');
     }
     db.execute(
-      '''INSERT INTO library_source_files (location_id, locator_key, name, size, revision)
-         VALUES (?, ?, ?, ?, ?)
+      '''INSERT INTO library_unhidden_source_files
+           (location_id, locator_key, content_hash) VALUES (?, ?, ?)
+         ON CONFLICT(location_id, locator_key) DO UPDATE SET
+           content_hash = excluded.content_hash''',
+      [locator.locationId, locator.key, row.columnAt(0)],
+    );
+    db.execute(
+      '''INSERT INTO library_source_files
+           (location_id, locator_key, name, size, revision, content_hash)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(location_id, locator_key) DO NOTHING''',
       [
         locator.locationId,
@@ -358,6 +371,7 @@ final class LibraryLocations {
         locator.key.split('/').last,
         row.columnAt(1),
         row.columnAt(2),
+        row.columnAt(0),
       ],
     );
     db.execute(
@@ -370,6 +384,11 @@ final class LibraryLocations {
   /// candidates again, without changing the old book identity or its notes.
   /// A hidden file (its book removed from the library) stays off the shelf
   /// while its bytes are unchanged; changed or gone, it is forgotten.
+  /// Removal sticks by content, not by key: a file listed with removed
+  /// content's provider-verified digest, or one read before as that content
+  /// at the same revision, is hidden at its current key and returned as
+  /// known. A file that may be removed content but has no digest yet is left
+  /// for [hideRemovedCopies] to read.
   ///
   /// A file a removed connection admitted or hid, listed again at the same
   /// key, size and revision, is the same file reconnected: its record moves to
@@ -390,22 +409,26 @@ final class LibraryLocations {
     }
     final admitted = {
       for (final row in db.select(
-        'SELECT locator_key, size, revision FROM library_source_admissions WHERE location_id = ?',
+        '''SELECT locator_key, size, revision, content_hash
+           FROM library_source_admissions WHERE location_id = ?''',
         [id],
       ))
         row.columnAt(0) as String: (
           size: row.columnAt(1) as int?,
           revision: row.columnAt(2) as String?,
+          hash: row.columnAt(3) as String,
         ),
     };
     final hidden = {
       for (final row in db.select(
-        'SELECT locator_key, size, revision FROM library_hidden_source_files WHERE location_id = ?',
+        '''SELECT locator_key, size, revision, content_hash
+           FROM library_hidden_source_files WHERE location_id = ?''',
         [id],
       ))
         row.columnAt(0) as String: (
           size: row.columnAt(1) as int?,
           revision: row.columnAt(2) as String?,
+          hash: row.columnAt(3) as String,
         ),
     };
     // What removed connections admitted or hid, by file key: a file listed
@@ -438,23 +461,51 @@ final class LibraryLocations {
           hiddenAt: row.columnAt(5) as String,
         ),
     };
+    // The content hashes read from files, reused while each is listed at the
+    // same provider revision.
+    final digests = {
+      for (final row in db.select(
+        '''SELECT locator_key, size, revision, content_hash FROM library_source_files
+           WHERE location_id = ? AND content_hash IS NOT NULL''',
+        [id],
+      ))
+        row.columnAt(0) as String: (
+          size: row.columnAt(1) as int?,
+          revision: row.columnAt(2) as String?,
+          hash: row.columnAt(3) as String,
+        ),
+    };
     final known = <String>{};
     final present = entries.map((entry) => entry.key).toSet();
     db.execute('DELETE FROM library_source_files WHERE location_id = ?', [id]);
-    for (final entry in entries) {
-      final previous = admitted[entry.key] ?? hidden[entry.key];
-      final unchanged =
-          previous != null &&
-          previous.size == entry.size &&
-          previous.revision == entry.revision;
+    for (final listed in entries) {
+      final entry = listed.withKnownSize();
+      // A digest the provider reports now outranks every earlier record.
+      final provided = _verifiedSha(entry);
+      final admission = admitted[entry.key];
+      final hiddenFile = hidden[entry.key];
+      // A hidden file stays hidden only while its bytes are shown to be the
+      // same: by its digest, or by an unchanged provider revision.
+      final unchanged = admission != null
+          ? admission.size == entry.size &&
+                admission.revision == entry.revision &&
+                (provided ?? admission.hash) == admission.hash
+          : hiddenFile != null &&
+                _identifies(
+                  hiddenFile.hash,
+                  hiddenFile.size,
+                  hiddenFile.revision,
+                  entry,
+                );
       if (unchanged ||
           _reconnected(db, id, entry, removedAdmitted, removedHidden)) {
         known.add(entry.key);
       } else {
+        final read = digests[entry.key];
         db.execute(
           '''INSERT INTO library_source_files
-          (location_id, locator_key, name, size, revision, folder_name)
-          VALUES (?, ?, ?, ?, ?, ?)''',
+          (location_id, locator_key, name, size, revision, folder_name, content_hash)
+          VALUES (?, ?, ?, ?, ?, ?, ?)''',
           [
             id,
             entry.key,
@@ -462,10 +513,19 @@ final class LibraryLocations {
             entry.size,
             entry.revision,
             entry.folderName,
+            provided ??
+                (read != null &&
+                        entry.revision != null &&
+                        read.size == entry.size &&
+                        read.revision == entry.revision
+                    ? read.hash
+                    : null),
           ],
         );
       }
     }
+    // Removed content is hidden at whatever key or revision it is listed.
+    known.addAll(hideRemovedSourceFiles(db, locationId: id));
     // A preview belongs to the bytes it was read from: one whose file went,
     // changed, or is now a known book is forgotten.
     db.execute(
@@ -501,8 +561,106 @@ final class LibraryLocations {
         [id, key],
       );
     }
+    for (final row in db.select(
+      'SELECT locator_key FROM library_unhidden_source_files WHERE location_id = ?',
+      [id],
+    )) {
+      if (!present.contains(row.columnAt(0))) {
+        db.execute(
+          'DELETE FROM library_unhidden_source_files WHERE location_id = ? AND locator_key = ?',
+          [id, row.columnAt(0)],
+        );
+      }
+    }
     return known;
   });
+
+  /// Read the files [scan] listed in [location] that may be content the
+  /// reader removed: those without a digest whose size matches removed
+  /// content, or whose size is unknown on either side. Each that is removed
+  /// content is hidden at whatever key or revision it is now. Returns the keys
+  /// not to offer: those hidden, and those that could not be read, or changed
+  /// while read, which the next scan reads again. A file read as other content
+  /// keeps its digest while its revision is unchanged, so it is not read again.
+  /// Stops with [LocationFailure.revoked] once [generation] is stale.
+  Future<Set<String>> hideRemovedCopies(
+    LibraryLocation location,
+    int generation, {
+    CancellationToken? cancellation,
+  }) async {
+    final id = location.id;
+    final suspects = await _store.read((db) {
+      if (!_hasGeneration(db, id, generation)) {
+        throw const LocationException(LocationFailure.revoked);
+      }
+      return [
+        for (final row in db.select(
+          '''SELECT locator_key, size, revision FROM library_source_files f
+             WHERE location_id = ? AND $_unreadRemovedSuspect
+             ORDER BY locator_key''',
+          [id],
+        ))
+          (
+            key: row.columnAt(0) as String,
+            size: row.columnAt(1) as int?,
+            revision: row.columnAt(2) as String?,
+          ),
+      ];
+    });
+    final withheld = <String>{};
+    for (final file in suspects) {
+      cancellation.throwIfCancelled();
+      if (!await _store.read((db) => _hasGeneration(db, id, generation))) {
+        throw const LocationException(LocationFailure.revoked);
+      }
+      String? hash;
+      try {
+        hash = await _digest(location, file.key, file.size, cancellation);
+        // The bytes are the listed file's only if it did not change while
+        // they were read.
+        final current = (await location.stat(
+          file.key,
+          cancellation: cancellation,
+        )).withKnownSize();
+        if (current.revision != file.revision ||
+            (file.size != null && current.size != file.size)) {
+          hash = null;
+        }
+      } on LocationException {
+        hash = null;
+      } on CoreException catch (error) {
+        if (error.kind == CoreErrorKind.cancelled) rethrow;
+        hash = null;
+      }
+      cancellation.throwIfCancelled();
+      final digest = hash;
+      if (digest == null) {
+        withheld.add(file.key);
+        continue;
+      }
+      final offered = await _store.transaction((db) {
+        if (!_hasGeneration(db, id, generation)) {
+          throw const LocationException(LocationFailure.revoked);
+        }
+        db.execute(
+          '''UPDATE library_source_files SET content_hash = ?
+             WHERE location_id = ? AND locator_key = ?
+               AND size IS ? AND revision IS ?''',
+          [digest, id, file.key, file.size, file.revision],
+        );
+        // Not updated: the listing changed while it was read.
+        if (db.updatedRows == 0) return false;
+        if (!isRemovedSourceFile(db, id, file.key, digest)) return true;
+        hideSourceFile(db, id, file.key, digest, file.size, file.revision);
+        return false;
+      });
+      if (!offered) withheld.add(file.key);
+    }
+    if (!await _store.read((db) => _hasGeneration(db, id, generation))) {
+      throw const LocationException(LocationFailure.revoked);
+    }
+    return withheld;
+  }
 
   /// Adopt a connection generation and its optional preference changes in one
   /// transaction, so credential replacement cannot leave a half-connected source.
@@ -815,6 +973,48 @@ Future<bool> _matchesContents(
   return size == copy.size && digest.toString() == copy.hash;
 }
 
+/// The content hash of the file at [key] if it holds exactly [size] bytes,
+/// or any number up to the book limit when [size] is unknown, else null.
+/// Stops reading at the first chunk past that.
+Future<String?> _digest(
+  LibraryLocation location,
+  String key,
+  int? size,
+  CancellationToken? cancellation,
+) async {
+  final limit = size ?? maxBookInputBytes;
+  var read = 0;
+  final digest = await sha256
+      .bind(
+        location.read(key, cancellation: cancellation).map((chunk) {
+          cancellation.throwIfCancelled();
+          read += chunk.length;
+          if (read > limit) {
+            throw const LocationException(LocationFailure.missing);
+          }
+          return chunk;
+        }),
+      )
+      .single;
+  return size == null || read == size ? digest.toString() : null;
+}
+
+/// The SHA-256 its provider verified for [entry], or null.
+String? _verifiedSha(LocationEntry entry) {
+  final sha = entry.sha256?.toLowerCase();
+  return sha != null && _sha256Hex.hasMatch(sha) ? sha : null;
+}
+
+final _sha256Hex = RegExp(r'^[0-9a-f]{64}$');
+
+/// A listed file, aliased `f`, that may be removed content and has not been
+/// read: no digest yet, and a size that matches removed content or is not
+/// known on one side. Kept off the shelf until [LibraryLocations.hideRemovedCopies]
+/// has read it.
+const _unreadRemovedSuspect = '''(f.content_hash IS NULL AND EXISTS (
+    SELECT 1 FROM library_removed_contents r
+    WHERE r.size IS NULL OR f.size IS NULL OR r.size = f.size))''';
+
 /// What a removed connection admitted or hid: the file's key, size and
 /// revision, the book it was, and when it was hidden.
 class _RemovedRecord {
@@ -833,8 +1033,24 @@ class _RemovedRecord {
   final String? hiddenAt;
 
   bool matches(LocationEntry entry) =>
-      size == entry.size && revision == entry.revision;
+      _identifies(contentHash, size, revision, entry);
 }
+
+/// Whether [entry] is shown to hold content [hash], recorded at [size] and
+/// [revision]: the same size, and its provider's digest is [hash] or, without
+/// one, its revision is the same known revision. Equal unknown revisions
+/// prove nothing.
+bool _identifies(
+  String hash,
+  int? size,
+  String? revision,
+  LocationEntry entry,
+) =>
+    size == entry.size &&
+    switch (_verifiedSha(entry)) {
+      final sha? => sha == hash,
+      null => revision != null && revision == entry.revision,
+    };
 
 /// Move the record a removed connection kept of [entry], listed by [id] at the
 /// size and revision it was admitted or hidden at, to [id]. An admitted file
@@ -890,21 +1106,29 @@ bool _reconnected(
   }
   final hidden = removedHidden[entry.key];
   if (hidden == null || !hidden.matches(entry)) return false;
+  // The reader unhid this file here: it is offered, not taken over hidden.
+  if (db
+      .select(
+        '''SELECT 1 FROM library_unhidden_source_files
+           WHERE location_id = ? AND locator_key = ? AND content_hash = ?''',
+        [id, entry.key, hidden.contentHash],
+      )
+      .isNotEmpty) {
+    return false;
+  }
+  // Hidden here like any other file, keeping when it was first hidden.
+  hideSourceFile(
+    db,
+    id,
+    entry.key,
+    hidden.contentHash,
+    entry.size,
+    entry.revision,
+  );
   db.execute(
-    '''INSERT INTO library_hidden_source_files
-         (location_id, locator_key, content_hash, size, revision, hidden_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(location_id, locator_key) DO UPDATE SET
-         content_hash = excluded.content_hash, size = excluded.size,
-         revision = excluded.revision, hidden_at = excluded.hidden_at''',
-    [
-      id,
-      entry.key,
-      hidden.contentHash,
-      entry.size,
-      entry.revision,
-      hidden.hiddenAt,
-    ],
+    '''UPDATE library_hidden_source_files SET hidden_at = ?
+       WHERE location_id = ? AND locator_key = ?''',
+    [hidden.hiddenAt, id, entry.key],
   );
   db.execute(
     'DELETE FROM library_hidden_source_files WHERE location_id = ? AND locator_key = ?',
