@@ -452,11 +452,18 @@ class _ReaderChromeBounds extends InheritedNotifier<ValueNotifier<int>> {
 }
 
 class _SelectionActionsLayout extends SingleChildLayoutDelegate {
-  const _SelectionActionsLayout({required this.target, required this.bounds});
+  const _SelectionActionsLayout({
+    required this.target,
+    required this.bounds,
+    this.handles = const [],
+  });
 
   static const _gap = 8.0;
   final Rect target;
   final Rect bounds;
+
+  /// The selection handles' touch targets, which the surface never covers.
+  final List<Rect> handles;
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
@@ -473,17 +480,56 @@ class _SelectionActionsLayout extends SingleChildLayoutDelegate {
       minLeft,
       maxLeft,
     );
-    final above = target.top - childSize.height - _gap;
-    final below = target.bottom + _gap;
+    final around = handles.fold(target, (rect, handle) {
+      return rect.expandToInclude(handle);
+    });
+    final above = around.top - childSize.height - _gap;
+    final below = around.bottom + _gap;
     final minTop = bounds.top + _gap;
     final maxTop = math.max(minTop, bounds.bottom - childSize.height - _gap);
     final top = (above >= minTop ? above : below).clamp(minTop, maxTop);
-    return Offset(left, top);
+    final preferred = Offset(left, top);
+    bool clear(Offset at) =>
+        !handles.any((handle) => handle.overlaps(at & childSize));
+    if (clear(preferred)) return preferred;
+    // Clamped back over the page, the surface would cover a handle: take
+    // the nearest place inside the bounds beside a handle or at an edge,
+    // across or along the page.
+    final lefts = [
+      left,
+      minLeft,
+      maxLeft,
+      for (final handle in handles) ...[
+        handle.left - childSize.width - _gap,
+        handle.right + _gap,
+      ],
+    ].map((value) => value.clamp(minLeft, maxLeft));
+    final tops = [
+      top,
+      minTop,
+      maxTop,
+      for (final handle in handles) ...[
+        handle.top - childSize.height - _gap,
+        handle.bottom + _gap,
+      ],
+    ].map((value) => value.clamp(minTop, maxTop));
+    final candidates =
+        [
+          for (final x in lefts)
+            for (final y in tops)
+              if (clear(Offset(x, y))) Offset(x, y),
+        ]..sort(
+          (a, b) =>
+              (a - preferred).distance.compareTo((b - preferred).distance),
+        );
+    return candidates.isEmpty ? preferred : candidates.first;
   }
 
   @override
   bool shouldRelayout(_SelectionActionsLayout oldDelegate) =>
-      target != oldDelegate.target || bounds != oldDelegate.bounds;
+      target != oldDelegate.target ||
+      bounds != oldDelegate.bounds ||
+      !listEquals(handles, oldDelegate.handles);
 }
 
 class _ReachableSelectableSurface extends StatelessWidget {
@@ -1300,6 +1346,24 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
 
   int? _touchPointer;
 
+  /// The handle being dragged: its pointer, where it went down, and the
+  /// caret it picked up, all in the surface's local coordinates.
+  ({int pointer, Offset origin, Offset caret})? _handleDrag;
+
+  bool get _handlesShown {
+    final phase = widget.model.selectionPhase;
+    return (widget.model.selectionTouch ??
+            switch (defaultTargetPlatform) {
+              TargetPlatform.iOS || TargetPlatform.android => true,
+              _ => false,
+            }) &&
+        (phase == ReaderSelectionPhase.selecting ||
+            phase == ReaderSelectionPhase.selected) &&
+        widget.model.anchor != null &&
+        widget.model.focus != null &&
+        widget.model.anchor != widget.model.focus;
+  }
+
   /// The pointer that may still become a tap, and where it went down.
   int? _tapPointer;
   Offset? _tapOrigin;
@@ -1354,7 +1418,8 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
         (position - origin).distance <= _tapSlop;
     _tapPointer = null;
     _tapOrigin = null;
-    if (!isTap) return;
+    // A handle being dragged owns the selection; a tap elsewhere leaves it.
+    if (!isTap || _handleDrag != null) return;
     // A touch tap anywhere on the page leaves a finished selection, as Esc
     // does; the capsule has no Cancel. (A mouse press already cancels on
     // pointer down.) It neither follows a link nor turns the page.
@@ -1484,7 +1549,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                 fit: widget.fit,
               )
             : ReaderEpubPageContentPainter(page: epubPage, fit: widget.fit);
-        return Listener(
+        final page = Listener(
           key: const ValueKey('reader-selection-surface'),
           behavior: HitTestBehavior.opaque,
           onPointerDown: (event) {
@@ -1512,6 +1577,9 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                   rangeEnd: value.rangeEnd.toInt(),
                   x: source.dx,
                   y: source.dy,
+                  touch:
+                      event.kind == ui.PointerDeviceKind.stylus ||
+                      event.kind == ui.PointerDeviceKind.invertedStylus,
                 ),
               );
             }
@@ -1596,6 +1664,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                     rangeEnd: value.rangeEnd.toInt(),
                     x: source.dx,
                     y: source.dy,
+                    touch: true,
                   ),
                 );
               },
@@ -1693,9 +1762,298 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             ),
           ),
         );
+        // The page keeps its place in this stack whether or not handles
+        // show, so a long press that makes a range keeps its recognizers.
+        final handles = _handlesShown;
+        final anchor = widget.model.anchor;
+        final focus = widget.model.focus;
+        final carets = !handles || anchor == null || focus == null
+            ? (start: null, end: null)
+            : _selectionHandleCarets(
+                widget.surface,
+                math.min(anchor, focus),
+                math.max(anchor, focus),
+              );
+        _HandleCaret? shown(_HandleCaret? caret) => caret == null
+            ? null
+            : (
+                from: transform.toDestination(caret.from),
+                to: transform.toDestination(caret.to),
+              );
+        final startHandle = shown(carets.start);
+        final endHandle = shown(carets.end);
+        Widget handleTarget(_HandleCaret caret, {required bool end}) {
+          final target = Rect.fromCenter(
+            center: _handleKnob(caret, end: end),
+            width: ShosaiTokens.sizeTouchTarget,
+            height: ShosaiTokens.sizeTouchTarget,
+          );
+          return Positioned.fromRect(
+            key: ValueKey(
+              'reader-selection-handle-slot-${end ? 'end' : 'start'}',
+            ),
+            rect: target,
+            child: RawGestureDetector(
+              key: ValueKey('reader-selection-handle-${end ? 'end' : 'start'}'),
+              behavior: HitTestBehavior.opaque,
+              // The screen reader selects through the surface's own actions.
+              excludeFromSemantics: true,
+              // A press on a handle is the handle's: it neither turns the
+              // page, scrolls, zooms nor dismisses the selection.
+              gestures: {
+                EagerGestureRecognizer:
+                    GestureRecognizerFactoryWithHandlers<
+                      EagerGestureRecognizer
+                    >(EagerGestureRecognizer.new, (_) {}),
+              },
+              child: Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: (event) {
+                  if (_handleDrag != null) return;
+                  // Only the primary button drags a handle, as on the page.
+                  if (event.kind == ui.PointerDeviceKind.mouse &&
+                      (event.buttons & 1) == 0) {
+                    return;
+                  }
+                  // Close handles' targets overlap and the later one is hit
+                  // first: a press inside both takes the nearer knob.
+                  final at = target.topLeft + event.localPosition;
+                  final other = end ? startHandle : endHandle;
+                  final otherKnob = other == null
+                      ? null
+                      : _handleKnob(other, end: !end);
+                  final takesOther =
+                      otherKnob != null &&
+                      Rect.fromCenter(
+                        center: otherKnob,
+                        width: ShosaiTokens.sizeTouchTarget,
+                        height: ShosaiTokens.sizeTouchTarget,
+                      ).contains(at) &&
+                      (otherKnob - at).distance <
+                          (_handleKnob(caret, end: end) - at).distance;
+                  final picked = takesOther ? other! : caret;
+                  // A press waiting on the page to become a tap must not
+                  // dismiss the range this handle now owns.
+                  _clearTapCandidate();
+                  _handleDrag = (
+                    pointer: event.pointer,
+                    origin: event.localPosition,
+                    caret: Offset.lerp(picked.from, picked.to, .5)!,
+                  );
+                  widget.dispatch(
+                    ReaderSelectionHandleStarted(
+                      event.pointer,
+                      end: takesOther ? !end : end,
+                    ),
+                  );
+                },
+                onPointerMove: (event) {
+                  final drag = _handleDrag;
+                  if (drag == null || drag.pointer != event.pointer) return;
+                  // The caret follows the finger from where it picked the
+                  // handle up, so the knob never jumps under it.
+                  final position =
+                      drag.caret + (event.localPosition - drag.origin);
+                  final value = endpoint(position, nearest: true);
+                  if (value == null) return;
+                  final source = transform.toSource(position, clamp: true);
+                  widget.dispatch(
+                    ReaderSelectionPointerMoved(
+                      event.pointer,
+                      value.offset.toInt(),
+                      x: source.dx,
+                      y: source.dy,
+                    ),
+                  );
+                },
+                onPointerUp: (event) {
+                  if (_handleDrag?.pointer != event.pointer) return;
+                  _handleDrag = null;
+                  widget.dispatch(ReaderSelectionPointerEnded(event.pointer));
+                },
+                onPointerCancel: (event) {
+                  if (_handleDrag?.pointer != event.pointer) return;
+                  _handleDrag = null;
+                  widget.dispatch(
+                    ReaderSelectionPointerCancelled(event.pointer),
+                  );
+                },
+              ),
+            ),
+          );
+        }
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            page,
+            if (startHandle != null || endHandle != null)
+              IgnorePointer(
+                child: CustomPaint(
+                  key: const ValueKey('reader-selection-handles'),
+                  painter: _SelectionHandlesPainter(
+                    start: startHandle,
+                    end: endHandle,
+                    color: ShellPalette.of(context).accent,
+                  ),
+                ),
+              ),
+            if (startHandle != null) handleTarget(startHandle, end: false),
+            if (endHandle != null) handleTarget(endHandle, end: true),
+          ],
+        );
       },
     );
   }
+}
+
+/// A selection handle's caret: a segment along the outer edge of the range's
+/// first or last grapheme. The start handle's knob stands beyond [from] and
+/// the end handle's beyond [to], so the knobs bracket the range.
+typedef _HandleCaret = ({Offset from, Offset to});
+
+/// The carets of the handles of the range from [start] to [end], in the
+/// surface's coordinates, or null for an end the surface does not show.
+///
+/// A handle stands on the caret zone at its end of the range: the leading
+/// half of the first grapheme and the trailing half of the last. Its edge is
+/// the side of that zone away from the grapheme's other half, so a
+/// right-to-left line puts the start handle on the right and a vertical
+/// line puts it across the top. A surface with one zone per grapheme has no
+/// other half and takes the left and right edges.
+({_HandleCaret? start, _HandleCaret? end}) _selectionHandleCarets(
+  FlutterSelectionSurface surface,
+  int start,
+  int end,
+) {
+  Rect rectOf(FlutterSelectionEndpoint endpoint) => Rect.fromLTRB(
+    endpoint.rect.left,
+    endpoint.rect.top,
+    endpoint.rect.right,
+    endpoint.rect.bottom,
+  );
+
+  /// The caret painted at [boundary] when no grapheme on its selected side
+  /// has a box, such as a range ending after a paragraph's separator: the
+  /// start handle takes the last such caret (a line's start rather than the
+  /// previous line's end), the end handle the first.
+  _HandleCaret? visibleCaret(int boundary, {required bool leading}) {
+    FlutterSelectionCaret? found;
+    for (final line in surface.visualLines) {
+      for (final caret in line.carets) {
+        if (caret.offset.toInt() != boundary) continue;
+        found = caret;
+        if (!leading) break;
+      }
+      if (found != null && !leading) break;
+    }
+    if (found == null) return null;
+    if (!found.vertical) {
+      return (
+        from: Offset(found.x, found.top),
+        to: Offset(found.x, found.bottom),
+      );
+    }
+    // A vertical caret crosses its column: take the column's width from a
+    // grapheme in it.
+    final y = found.alongLine;
+    var left = found.x - 8;
+    var right = found.x + 8;
+    for (final endpoint in surface.endpoints) {
+      final rect = endpoint.rect;
+      if (rect.left <= found.x && found.x <= rect.right) {
+        left = rect.left;
+        right = rect.right;
+        break;
+      }
+    }
+    return (from: Offset(right, y), to: Offset(left, y));
+  }
+
+  _HandleCaret? caret({required bool leading}) {
+    final boundary = leading ? start : end;
+    FlutterSelectionEndpoint? zone;
+    for (final endpoint in surface.endpoints) {
+      final edge = leading ? endpoint.rangeStart : endpoint.rangeEnd;
+      if (edge.toInt() != boundary) continue;
+      if (endpoint.offset.toInt() == boundary) {
+        zone = endpoint;
+        break;
+      }
+      zone ??= endpoint;
+    }
+    if (zone == null) return visibleCaret(boundary, leading: leading);
+    final rect = rectOf(zone);
+    Offset? other;
+    for (final endpoint in surface.endpoints) {
+      if (endpoint.rangeStart == zone.rangeStart &&
+          endpoint.rangeEnd == zone.rangeEnd &&
+          endpoint.rect != zone.rect) {
+        other = rectOf(endpoint).center - rect.center;
+        break;
+      }
+    }
+    if (other == null || other.dx.abs() >= other.dy.abs()) {
+      final x = switch (other) {
+        null => leading ? rect.left : rect.right,
+        final other => other.dx > 0 ? rect.left : rect.right,
+      };
+      return (from: Offset(x, rect.top), to: Offset(x, rect.bottom));
+    }
+    final y = other.dy > 0 ? rect.top : rect.bottom;
+    return (from: Offset(rect.right, y), to: Offset(rect.left, y));
+  }
+
+  return (start: caret(leading: true), end: caret(leading: false));
+}
+
+/// The centre of a handle's knob on [caret], just beyond its end.
+Offset _handleKnob(_HandleCaret caret, {required bool end}) {
+  final along = caret.to - caret.from;
+  final direction = along.distance == 0
+      ? const Offset(0, 1)
+      : along / along.distance;
+  return end
+      ? caret.to + direction * _SelectionHandlesPainter.knobRadius
+      : caret.from - direction * _SelectionHandlesPainter.knobRadius;
+}
+
+/// The selection handles (`docs/design-system.md`, Highlight): a 2 px
+/// `accent` stem along each end of the range, with a 12 px `accent` knob
+/// beyond the start's leading end and the end's trailing end.
+class _SelectionHandlesPainter extends CustomPainter {
+  const _SelectionHandlesPainter({
+    required this.start,
+    required this.end,
+    required this.color,
+  });
+
+  static const double knobRadius = 6;
+  static const double stemWidth = 2;
+
+  final _HandleCaret? start;
+  final _HandleCaret? end;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stem = Paint()
+      ..color = color
+      ..strokeWidth = stemWidth
+      ..strokeCap = StrokeCap.butt;
+    final knob = Paint()..color = color;
+    for (final (caret, end) in [(start, false), (this.end, true)]) {
+      if (caret == null) continue;
+      canvas.drawLine(caret.from, caret.to, stem);
+      canvas.drawCircle(_handleKnob(caret, end: end), knobRadius, knob);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SelectionHandlesPainter oldDelegate) =>
+      oldDelegate.start != start ||
+      oldDelegate.end != end ||
+      oldDelegate.color != color;
 }
 
 /// Keep the recognizer installed while selection changes. Disposing a pending

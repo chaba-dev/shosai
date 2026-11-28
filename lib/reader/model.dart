@@ -478,6 +478,7 @@ final class ReaderModel {
     this.anchor,
     this.focus,
     this.selectionPointer,
+    this.selectionTouch,
     this.selectionVisualLine,
     this.selectionPreferredX,
     this.keyboardActionInvocation = false,
@@ -630,6 +631,10 @@ final class ReaderModel {
   final int? anchor;
   final int? focus;
   final int? selectionPointer;
+
+  /// Whether the last pointer selection was made with a finger, which shows
+  /// the selection's handles; null before any, when the platform decides.
+  final bool? selectionTouch;
   final int? selectionVisualLine;
   final double? selectionPreferredX;
   final bool keyboardActionInvocation;
@@ -804,6 +809,7 @@ final class ReaderModel {
     Object? anchor = _unchanged,
     Object? focus = _unchanged,
     Object? selectionPointer = _unchanged,
+    bool? selectionTouch,
     Object? selectionVisualLine = _unchanged,
     Object? selectionPreferredX = _unchanged,
     bool? keyboardActionInvocation,
@@ -899,6 +905,7 @@ final class ReaderModel {
       selectionPointer: identical(selectionPointer, _unchanged)
           ? this.selectionPointer
           : selectionPointer as int?,
+      selectionTouch: selectionTouch ?? this.selectionTouch,
       selectionVisualLine: identical(selectionVisualLine, _unchanged)
           ? this.selectionVisualLine
           : selectionVisualLine as int?,

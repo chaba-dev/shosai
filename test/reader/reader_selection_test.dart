@@ -813,6 +813,303 @@ void main() {
       expect(bridge.created, isEmpty);
     });
 
+    group('touch selection handles', () {
+      /// Long-presses fixture character [from] and drags to [to] with a
+      /// finger, the way a touch reader makes a selection.
+      Future<void> touchSelect(WidgetTester tester, int from, int to) async {
+        final finger = await tester.startGesture(
+          renderedFixtureOffset(tester, from),
+          kind: ui.PointerDeviceKind.touch,
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+        await finger.moveTo(renderedFixtureOffset(tester, to));
+        await tester.pump();
+        await finger.up();
+        await settleReaderSelection(tester);
+      }
+
+      Finder handle(String which) =>
+          find.byKey(ValueKey('reader-selection-handle-$which'));
+
+      /// Drags handle [which] by the distance between two fixture
+      /// characters' centres, plus a quarter character so the finger lands
+      /// inside a character rather than on the caret between two.
+      Future<void> dragHandle(
+        WidgetTester tester,
+        String which, {
+        required int from,
+        required int to,
+      }) async {
+        final width =
+            renderedFixtureOffset(tester, 1).dx -
+            renderedFixtureOffset(tester, 0).dx;
+        final delta =
+            renderedFixtureOffset(tester, to) -
+            renderedFixtureOffset(tester, from) +
+            Offset(width / 4, 0);
+        final finger = await tester.startGesture(
+          tester.getCenter(handle(which)),
+          kind: ui.PointerDeviceKind.touch,
+        );
+        await tester.pump();
+        await finger.moveBy(delta / 2);
+        await tester.pump();
+        await finger.moveBy(delta / 2);
+        await tester.pump();
+        await finger.up();
+        await settleReaderSelection(tester);
+      }
+
+      Future<(int, int)> commit(
+        WidgetTester tester,
+        _SelectionBridge bridge,
+      ) async {
+        await tester.tap(_action('selection-swatch-yellow'));
+        await settleReaderSelection(tester);
+        final range = bridge.created.single.textRange!;
+        return (range.start.toInt(), range.end.toInt());
+      }
+
+      testWidgets('dragging the end handle extends the range', (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge();
+        await _open(tester, _reader(bridge: bridge));
+        await touchSelect(tester, 4, 12);
+        expect(handle('start'), findsOneWidget);
+        expect(handle('end'), findsOneWidget);
+        // Each handle is a touch target over its end of the range.
+        expect(tester.getSize(handle('end')), const Size(44, 44));
+        expect(
+          tester.getCenter(handle('start')).dx,
+          lessThan(renderedFixtureOffset(tester, 4).dx),
+        );
+        expect(
+          tester.getCenter(handle('end')).dx,
+          greaterThan(renderedFixtureOffset(tester, 11).dx),
+        );
+
+        // The action surface stays clear of both handles.
+        final actions = tester.getRect(
+          find.byKey(const ValueKey('selection-actions')),
+        );
+        for (final which in ['start', 'end']) {
+          expect(
+            actions.overlaps(tester.getRect(handle(which))),
+            isFalse,
+            reason: 'the actions leave the $which handle uncovered',
+          );
+        }
+
+        // The last selected character is 11; its handle moves onto the
+        // second line, to character 20, which the range now includes.
+        await dragHandle(tester, 'end', from: 11, to: 20);
+        expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+        expect(await commit(tester, bridge), (4, 21));
+      });
+
+      testWidgets('dragging the start handle past the end reverses the range', (
+        tester,
+      ) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge();
+        await _open(tester, _reader(bridge: bridge));
+        await touchSelect(tester, 4, 12);
+
+        // The start handle leaves at character 4 and crosses the range's
+        // end (12): the end stays put and becomes the start.
+        await dragHandle(tester, 'start', from: 4, to: 30);
+        expect(await commit(tester, bridge), (12, 30));
+      });
+
+      testWidgets('a tap on a handle keeps the selection', (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge();
+        await _open(tester, _reader(bridge: bridge));
+        await touchSelect(tester, 4, 12);
+
+        // A tap on the page dismisses the selection; one on a handle is the
+        // handle's and leaves it as it was.
+        await tester.tapAt(
+          tester.getCenter(handle('end')),
+          kind: ui.PointerDeviceKind.touch,
+        );
+        await settleReaderSelection(tester);
+        expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+        expect(await commit(tester, bridge), (4, 12));
+      });
+
+      testWidgets('a press on the start knob takes it when targets overlap', (
+        tester,
+      ) async {
+        _setView(tester, const Size(390, 844));
+        final bridge = _SelectionBridge();
+        await _open(tester, _reader(bridge: bridge));
+        await touchSelect(tester, 4, 5);
+        expect(
+          tester
+              .getRect(handle('start'))
+              .overlaps(tester.getRect(handle('end'))),
+          isTrue,
+          reason: 'one short range puts both targets over each other',
+        );
+        await dragHandle(tester, 'start', from: 4, to: 2);
+        expect(await commit(tester, bridge), (2, 5));
+      });
+
+      testWidgets('a page tap while a handle is held keeps the selection', (
+        tester,
+      ) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge();
+        await _open(tester, _reader(bridge: bridge));
+        await touchSelect(tester, 4, 12);
+
+        // A second finger on an unselected word of the page.
+        final page = await tester.startGesture(
+          renderedFixtureOffset(tester, 45),
+          kind: ui.PointerDeviceKind.touch,
+        );
+        await tester.pump();
+        final held = await tester.startGesture(
+          tester.getCenter(handle('end')),
+          kind: ui.PointerDeviceKind.touch,
+        );
+        await tester.pump();
+        await page.up();
+        await tester.pump(const Duration(milliseconds: 400));
+        await held.moveBy(
+          renderedFixtureOffset(tester, 14) - renderedFixtureOffset(tester, 11),
+        );
+        await tester.pump();
+        await held.up();
+        await settleReaderSelection(tester);
+        expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+        expect(await commit(tester, bridge), (4, 15));
+      });
+
+      testWidgets('a secondary click keeps the handles of a touch selection', (
+        tester,
+      ) async {
+        _setView(tester, const Size(1280, 800));
+        await _open(tester, _reader(bridge: _SelectionBridge()));
+        await touchSelect(tester, 4, 12);
+        await tester.tapAt(
+          renderedFixtureOffset(tester, 8),
+          kind: ui.PointerDeviceKind.mouse,
+          buttons: kSecondaryMouseButton,
+        );
+        await settleReaderSelection(tester);
+        expect(handle('start'), findsOneWidget);
+        expect(handle('end'), findsOneWidget);
+      });
+
+      testWidgets('a capsule kept inside a short view leaves the handles', (
+        tester,
+      ) async {
+        _setView(tester, const Size(390, 330));
+        await _open(tester, _reader(bridge: _SelectionBridge()));
+        await touchSelect(tester, 2, 52);
+        final actions = tester.getRect(
+          find.byKey(const ValueKey('selection-actions')),
+        );
+        for (final which in ['start', 'end']) {
+          if (handle(which).evaluate().isEmpty) continue;
+          expect(
+            actions.overlaps(tester.getRect(handle(which))),
+            isFalse,
+            reason: 'the actions leave the $which handle uncovered',
+          );
+        }
+      });
+
+      testWidgets('a press only in the start target drags the start', (
+        tester,
+      ) async {
+        _setView(tester, const Size(390, 640));
+        // A tall page fitted small puts the two knobs close together.
+        final bridge = _SelectionBridge(pageWidth: 420, pageHeight: 1900);
+        await _open(tester, _reader(bridge: bridge));
+        await touchSelect(tester, 4, 5);
+        final start = tester.getRect(handle('start'));
+        final end = tester.getRect(handle('end'));
+        final at = start.bottomLeft + const Offset(2, -2);
+        expect(end.contains(at), isFalse);
+        expect(
+          (at - end.center).distance,
+          lessThan((at - start.center).distance),
+          reason: 'the press is nearer the end knob but only in the start',
+        );
+        final width =
+            renderedFixtureOffset(tester, 1).dx -
+            renderedFixtureOffset(tester, 0).dx;
+        final finger = await tester.startGesture(
+          at,
+          kind: ui.PointerDeviceKind.touch,
+        );
+        await tester.pump();
+        await finger.moveBy(
+          renderedFixtureOffset(tester, 2) -
+              renderedFixtureOffset(tester, 4) +
+              Offset(width / 4, 0),
+        );
+        await tester.pump();
+        await finger.up();
+        await settleReaderSelection(tester);
+        expect(await commit(tester, bridge), (2, 5));
+      });
+
+      testWidgets('a secondary drag on a handle leaves the range', (
+        tester,
+      ) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge();
+        await _open(tester, _reader(bridge: bridge));
+        await touchSelect(tester, 4, 12);
+        final mouse = await tester.startGesture(
+          tester.getCenter(handle('end')),
+          kind: ui.PointerDeviceKind.mouse,
+          buttons: kSecondaryMouseButton,
+        );
+        await tester.pump();
+        await mouse.moveBy(
+          renderedFixtureOffset(tester, 14) - renderedFixtureOffset(tester, 11),
+        );
+        await tester.pump();
+        await mouse.up();
+        await settleReaderSelection(tester);
+        expect(await commit(tester, bridge), (4, 12));
+      });
+
+      testWidgets('a capsule in a wide, short view moves beside a handle', (
+        tester,
+      ) async {
+        _setView(tester, const Size(1200, 216));
+        await _open(tester, _reader(bridge: _SelectionBridge()));
+        await touchSelect(tester, 2, 37);
+        final actions = tester.getRect(
+          find.byKey(const ValueKey('selection-actions')),
+        );
+        for (final which in ['start', 'end']) {
+          if (handle(which).evaluate().isEmpty) continue;
+          expect(
+            actions.overlaps(tester.getRect(handle(which))),
+            isFalse,
+            reason: 'the actions leave the $which handle uncovered',
+          );
+        }
+      });
+
+      testWidgets('a mouse selection shows no handles', (tester) async {
+        _setView(tester, const Size(1280, 800));
+        await _open(tester, _reader(bridge: _SelectionBridge()));
+        await dragFixtureSelection(tester, from: 4, to: 12);
+        await settleReaderSelection(tester);
+        expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+        expect(handle('start'), findsNothing);
+        expect(handle('end'), findsNothing);
+      });
+    });
+
     testWidgets('the action surface stays inside the viewport', (tester) async {
       _setView(tester, const Size(390, 844));
       await _open(tester, _reader(bridge: _SelectionBridge()));

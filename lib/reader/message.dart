@@ -675,13 +675,26 @@ final class ReaderSelectionPointerStarted extends ReaderMessage {
     this.rangeEnd,
     this.x,
     this.y,
+    this.touch = false,
   });
   final int pointer;
   final int offset;
+
+  /// Whether a finger made the press, so the selection shows handles.
+  final bool touch;
   final int? rangeStart;
   final int? rangeEnd;
   final double? x;
   final double? y;
+}
+
+/// A press on one of a finished selection's handles: [pointer] now drags
+/// that end of the range, the [end] handle when true and the start handle
+/// otherwise, while the other end stays where it is.
+final class ReaderSelectionHandleStarted extends ReaderMessage {
+  const ReaderSelectionHandleStarted(this.pointer, {required this.end});
+  final int pointer;
+  final bool end;
 }
 
 final class ReaderSelectionPointerPressedOutside extends ReaderMessage {

@@ -619,6 +619,7 @@ final class ReaderController implements Listenable {
           ReaderSelectionStarted() ||
           ReaderSelectionExtended() ||
           ReaderSelectionPointerStarted() ||
+          ReaderSelectionHandleStarted() ||
           ReaderSelectionPointerPressedOutside() ||
           ReaderSelectionPointerMoved() ||
           ReaderSelectionPointerEnded() ||
@@ -680,6 +681,7 @@ final class ReaderController implements Listenable {
       case ReaderSelectionStarted() ||
           ReaderSelectionExtended() ||
           ReaderSelectionPointerStarted() ||
+          ReaderSelectionHandleStarted() ||
           ReaderSelectionKeyboardExtended() ||
           ReaderSelectionAllRequested() ||
           ReaderSelectionSearchRequested() ||
@@ -705,6 +707,7 @@ final class ReaderController implements Listenable {
           ReaderPanelToggled() ||
           ReaderSearchToggled() ||
           ReaderSelectionPointerStarted() ||
+          ReaderSelectionHandleStarted() ||
           ReaderSelectionKeyboardExtended() ||
           ReaderSelectionAllRequested() ||
           ReaderSuspended() ||
@@ -1343,7 +1346,10 @@ final class ReaderController implements Listenable {
           message.rangeEnd,
           message.x,
           message.y,
+          touch: message.touch,
         );
+      case ReaderSelectionHandleStarted():
+        _selectionHandleStarted(message.pointer, end: message.end);
       case ReaderSelectionPointerPressedOutside():
         if (_model.selectionPointer == null) {
           // A press outside cancels like Escape: the match the book opened
@@ -5611,8 +5617,9 @@ final class ReaderController implements Listenable {
     int? rangeStart,
     int? rangeEnd,
     double? x,
-    double? y,
-  ) {
+    double? y, {
+    required bool touch,
+  }) {
     final surface = _model.selectionSurface;
     if (surface == null || _model.relayoutBusy || _closing) return;
     if (_model.selectionPointer case final owner? when owner != pointer) return;
@@ -5635,9 +5642,44 @@ final class ReaderController implements Listenable {
         anchor: offset,
         focus: offset,
         selectionPointer: pointer,
+        selectionTouch: touch,
         selectionVisualLine: affinity?.line,
         selectionPreferredX: affinity?.preferredX,
         selectionActionError: null,
+      ),
+    );
+  }
+
+  /// Picks up one end of a finished selection: the range is being selected
+  /// again, from its other end, and [pointer]'s moves, release and loss of
+  /// capture follow the same path as the drag that made it.
+  void _selectionHandleStarted(int pointer, {required bool end}) {
+    final anchor = _model.anchor;
+    final focus = _model.focus;
+    if (_model.selectionPhase != ReaderSelectionPhase.selected ||
+        _model.selectionPointer != null ||
+        _model.selectionSurface == null ||
+        _model.relayoutBusy ||
+        _closing ||
+        anchor == null ||
+        focus == null) {
+      return;
+    }
+    final start = anchor < focus ? anchor : focus;
+    final finish = anchor < focus ? focus : anchor;
+    _focusAdapter(ReaderFocusTarget.surface);
+    _cancelSelectionCreates();
+    _selectionRevision += 1;
+    _emit(
+      _model.copyWith(
+        selectionPhase: ReaderSelectionPhase.selecting,
+        anchor: end ? start : finish,
+        focus: end ? finish : start,
+        selectionPointer: pointer,
+        selectionVisualLine: null,
+        selectionPreferredX: null,
+        selectionActionError: null,
+        keyboardActionInvocation: false,
       ),
     );
   }
