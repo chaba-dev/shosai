@@ -852,8 +852,8 @@ void main() {
           await tester.pump();
         }
         expect(find.text('追加する本を確認'), findsOneWidget);
-        expect(find.text('アプリ内にコピーを保存'), findsOneWidget);
-        expect(find.text('選択した本のコピーをShōsai内に保存します。'), findsOneWidget);
+        expect(find.text('コピーを保存'), findsOneWidget);
+        expect(find.text('選択した本のコピーを新しい本の保存先に保存します。'), findsOneWidget);
         expect(find.text('Import'), findsNothing);
         await tester.tap(
           find

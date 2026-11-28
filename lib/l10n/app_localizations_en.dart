@@ -783,8 +783,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get importManagedCopy => 'Copy into managed storage';
 
   @override
+  String get importHandedCopy => 'Save a copy';
+
+  @override
   String get importPickedCopyHint =>
       'Shōsai keeps its own copy of each picked book.';
+
+  @override
+  String get importHandedCopyHint =>
+      'Shōsai saves a copy of each picked book where new books are saved.';
 
   @override
   String get importPrivateCopyHint =>

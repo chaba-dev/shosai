@@ -944,6 +944,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       final selection = LibraryImportSelection(
         paths: staged,
         managed: true,
+        handed: true,
         cleanup: () => _openedDocuments.discard(staged),
       );
       handedOff = true;
@@ -1053,9 +1054,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               );
             } else {
               try {
-                final importedReport = await records.importPaths(
+                // The staged copy has no extension; the provider's display
+                // name is the book's own name.
+                final importedReport = await records.saveHandedBooks(
                   pathKeys: [acquisition.path],
-                  managed: true,
+                  names: [document.name],
                   cancellationId: cancellation,
                 );
                 imported += importedReport.imported.toInt();
@@ -1191,9 +1194,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 ),
                 const SizedBox(height: 8),
                 _SettingSwitch(
-                  title: l10n.importManagedCopy,
+                  title: managedOnly && !directory
+                      ? l10n.importHandedCopy
+                      : l10n.importManagedCopy,
                   subtitle: managedOnly
-                      ? l10n.importPickedCopyHint
+                      ? directory
+                            ? l10n.importPickedCopyHint
+                            : l10n.importHandedCopyHint
                       : managed
                       ? l10n.importPrivateCopyHint
                       : l10n.importLinkedCopyHint,
