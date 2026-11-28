@@ -667,9 +667,9 @@ class HarnessBridge
 
   /// Pending annotation-list answers, consumed before the immediate empty list.
   ///
-  /// A test uses one to hold a relayout open between its session creation and
-  /// its page installation, which is the window a superseding relayout must not
-  /// dispose the installed session in.
+  /// A relayout lists highlights after it installs its page, so a test uses one
+  /// to hold a relayout open after its page shows, or to show a page whose
+  /// highlights have not arrived yet.
   final List<Completer<List<FlutterAnnotation>>> annotationListCompleters =
       <Completer<List<FlutterAnnotation>>>[];
 

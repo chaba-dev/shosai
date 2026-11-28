@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -503,8 +502,8 @@ void main() {
     await closeReader(tester);
   });
 
-  testWidgets('a resize keeps a pending chapter-end target and releases its '
-      'superseded session', (tester) async {
+  testWidgets('a resize during a chapter-end measurement releases the '
+      'session it never installed', (tester) async {
     final sessions = <ChapterLayoutSession>[];
     final harness = bridge(
       readingState: FlutterReadingState(
@@ -520,35 +519,48 @@ void main() {
       sessionObserver: sessions.add,
     );
     await settleEpubPage(tester);
+    final before = sessions.length;
+    final shown = dartPage(tester)!.page;
 
-    final held = Completer<List<FlutterAnnotation>>();
-    harness.annotationListCompleters.add(held);
+    // The page back measures the previous chapter to its end in batches that
+    // yield on a timer; without advancing the clock the relayout stays
+    // between its session's creation and its page's installation.
     await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
-    await settleNative(tester, rounds: 3);
+    for (var i = 0; i < 4; i += 1) {
+      await tester.pump();
+    }
     expect(
-      harness.annotationListCompleters,
-      isEmpty,
-      reason: 'the end-targeted relayout is waiting for annotations',
+      sessions.length,
+      before + 1,
+      reason: 'the page back built a session',
     );
     final superseded = sessions.last;
     expect(superseded.isDisposed, isFalse);
+    expect(
+      dartPage(tester)!.page.canonicalStart,
+      shown.canonicalStart,
+      reason: 'the end page is still being measured',
+    );
+    expect(dartPage(tester)!.page.unit, shown.unit);
 
     tester.view.physicalSize = const ui.Size(1400, 800);
     await settleNative(tester, rounds: 5);
     final installed = sessions.last;
     final last = dartPage(tester)!.page;
     expect(last.unit, book.chapters.first.spine);
-    expect(last.targetScalar, chapter.scalarCount);
+    // The exact target scalar is not replayed after the supersession (it was
+    // not on main either), but the reader still shows the chapter's last
+    // spread, not its first page.
     expect(last.pageIndex.isEven, isTrue);
     expect(last.canonicalEnd, greaterThanOrEqualTo(chapter.scalarCount - 1));
     expect(installed, isNot(same(superseded)));
     expect(installed.isDisposed, isFalse);
-    expect(superseded.isDisposed, isFalse);
-
-    held.complete(const []);
-    await settleNative(tester, rounds: 3);
-    expect(superseded.isDisposed, isTrue);
-    expect(installed.isDisposed, isFalse);
+    expect(
+      superseded.isDisposed,
+      isTrue,
+      reason: 'the superseded relayout releases the session it never installed',
+    );
+    expect(tester.takeException(), isNull);
     await closeReader(tester);
   });
 
