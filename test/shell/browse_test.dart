@@ -796,6 +796,146 @@ void main() {
     expect(find.textContaining('by Project Gutenberg'), findsNothing);
   });
 
+  testWidgets(
+    'phones show five subjects and a chip for the rest',
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+    }),
+    (tester) async {
+      final d = (await tester.runAsync(() => catalog.book('0')))!;
+      final messages = <BrowseMessage>[];
+      // Eight headings, one a Standard Ebooks duplicate of a Gutenberg one,
+      // make seven tags.
+      const subjects = [
+        'Courtship -- Fiction',
+        'Courtship--Fiction',
+        'Domestic fiction',
+        'England -- Fiction',
+        'Love stories',
+        'Sisters -- Fiction',
+        'Social classes -- Fiction',
+        'Young women -- Fiction',
+      ];
+      Future<void> show(
+        ShellLayout layout,
+        Size size, {
+        bool expanded = false,
+      }) {
+        HarnessView(size: size).apply(tester);
+        return tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: ShellBrowsePage(
+                layout: layout,
+                model: BrowseModel(
+                  details: (
+                    book: d.book,
+                    editions: d.editions,
+                    subjects: subjects,
+                    authors: d.authors,
+                    summary: d.summary,
+                    readingEase: d.readingEase,
+                    description: null,
+                    wordCount: null,
+                    released: null,
+                    releasedBy: null,
+                    series: const [],
+                    moreByAuthor: const [],
+                  ),
+                  subjectsExpanded: expanded,
+                ),
+                local: const ShellSearchModel(),
+                dispatch: messages.add,
+                onChosen: (_) {},
+              ),
+            ),
+          ),
+        );
+      }
+
+      await show(ShellLayout.phone, const Size(430, 932));
+      for (final tag in [
+        'Courtship',
+        'Domestic fiction',
+        'England',
+        'Love stories',
+        'Sisters',
+      ]) {
+        expect(find.text(tag), findsOneWidget);
+      }
+      expect(find.text('Social classes'), findsNothing);
+      expect(find.text('Courtship--Fiction'), findsNothing);
+      final more = find.widgetWithText(ActionChip, '+2 more');
+      await tester.ensureVisible(more);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(more).height, greaterThanOrEqualTo(44));
+      await tester.tap(more);
+      expect(messages.whereType<BrowseSubjectsExpanded>(), hasLength(1));
+
+      await show(ShellLayout.phone, const Size(430, 932), expanded: true);
+      expect(find.text('Young women'), findsOneWidget);
+      expect(find.text('+2 more'), findsNothing);
+
+      // Wider layouts show every tag without the chip.
+      await show(ShellLayout.desktop, const Size(1280, 900));
+      expect(find.text('Young women'), findsOneWidget);
+      expect(find.text('+2 more'), findsNothing);
+    },
+  );
+
+  testWidgets('several authors keep the book facts on their own line', (
+    tester,
+  ) async {
+    const HarnessView(size: Size(430, 932)).apply(tester);
+    final d = (await tester.runAsync(() => catalog.book('0')))!;
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: ShellBrowsePage(
+            layout: ShellLayout.phone,
+            model: BrowseModel(
+              details: (
+                book: d.book,
+                editions: d.editions,
+                subjects: const [],
+                authors: [
+                  d.authors.single,
+                  (
+                    id: 'chapman',
+                    name: 'R. W. Chapman',
+                    birthYear: 1881,
+                    deathYear: 1960,
+                    books: 1,
+                  ),
+                ],
+                summary: null,
+                readingEase: d.readingEase,
+                description: null,
+                wordCount: null,
+                released: null,
+                releasedBy: null,
+                series: const [],
+                moreByAuthor: const [],
+              ),
+            ),
+            local: const ShellSearchModel(),
+            dispatch: (_) {},
+            onChosen: (_) {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('1881–1960'), findsOneWidget);
+    final facts = find.text('English · Reading ease 69');
+    expect(facts, findsOneWidget);
+    // Below every author line, not sharing a row with the last one.
+    expect(
+      tester.getTopLeft(facts).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(find.text('1881–1960')).dy),
+    );
+  });
+
   testWidgets('authorless books keep their facts; links are labelled links', (
     tester,
   ) async {

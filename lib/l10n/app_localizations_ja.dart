@@ -1526,6 +1526,18 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String catalogMoreSubjects(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '他$countString件';
+  }
+
+  @override
+  String get catalogShowAllSubjects => 'すべての件名を表示';
+
+  @override
   String get catalogAboutBook => 'この本について';
 
   @override

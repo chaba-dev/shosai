@@ -221,6 +221,7 @@ class BrowseController extends ChangeNotifier {
             detailBusy: false,
             detailFailed: details == null,
             edition: 0,
+            subjectsExpanded: false,
           ),
         );
       case BrowseBackRequested():
@@ -234,6 +235,8 @@ class BrowseController extends ChangeNotifier {
             detailFailed: false,
           ),
         );
+      case BrowseSubjectsExpanded():
+        _emit(_model.copyWith(subjectsExpanded: true));
       case BrowseEditionSelected(:final index):
         if (!_model.acquisition.busy &&
             index >= 0 &&
@@ -628,6 +631,9 @@ class BrowseController extends ChangeNotifier {
   }
 }
 
+/// Subject tags a phone details page shows before its "+N more" chip.
+const catalogPhoneSubjectLimit = 5;
+
 final class BrowseModel {
   const BrowseModel({
     this.criteria = (
@@ -654,6 +660,7 @@ final class BrowseModel {
     this.detailBusy = false,
     this.detailFailed = false,
     this.edition = 0,
+    this.subjectsExpanded = false,
     this.linkFailed = false,
     this.saveOptions,
     this.optionsBusy = false,
@@ -682,6 +689,10 @@ final class BrowseModel {
       linkFailed;
   final CatalogBookDetails? details;
   final int edition;
+
+  /// Whether the phone details page shows every subject tag, not just the
+  /// first [catalogPhoneSubjectLimit].
+  final bool subjectsExpanded;
   BrowseModel copyWith({
     BrowseCriteria? criteria,
     List<CatalogBook>? books,
@@ -700,6 +711,7 @@ final class BrowseModel {
     bool? detailBusy,
     bool? detailFailed,
     int? edition,
+    bool? subjectsExpanded,
     bool? linkFailed,
     CatalogSaveOptions? Function()? saveOptions,
     bool? optionsBusy,
@@ -729,6 +741,7 @@ final class BrowseModel {
     detailBusy: detailBusy ?? this.detailBusy,
     detailFailed: detailFailed ?? this.detailFailed,
     edition: edition ?? this.edition,
+    subjectsExpanded: subjectsExpanded ?? this.subjectsExpanded,
     linkFailed: linkFailed ?? false,
     saveOptions: saveOptions == null ? this.saveOptions : saveOptions(),
     optionsBusy: optionsBusy ?? this.optionsBusy,
@@ -791,6 +804,10 @@ final class BrowseBookRequested extends BrowseMessage {
 
 final class BrowseBackRequested extends BrowseMessage {
   const BrowseBackRequested();
+}
+
+final class BrowseSubjectsExpanded extends BrowseMessage {
+  const BrowseSubjectsExpanded();
 }
 
 final class BrowseEditionSelected extends BrowseMessage {

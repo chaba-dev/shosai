@@ -2646,6 +2646,18 @@ abstract class AppLocalizations {
   /// **'{year} BCE'**
   String catalogYearBce(int year);
 
+  /// No description provided for @catalogMoreSubjects.
+  ///
+  /// In en, this message translates to:
+  /// **'+{count} more'**
+  String catalogMoreSubjects(int count);
+
+  /// No description provided for @catalogShowAllSubjects.
+  ///
+  /// In en, this message translates to:
+  /// **'Show all subjects'**
+  String get catalogShowAllSubjects;
+
   /// No description provided for @catalogAboutBook.
   ///
   /// In en, this message translates to:
