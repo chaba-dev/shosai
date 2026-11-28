@@ -14,6 +14,10 @@ abstract interface class CatalogHost {
   CatalogClient get catalog;
   Future<List<String>> recentCatalogSearches();
   Future<void> saveRecentCatalogSearches(List<String> queries);
+
+  /// The free-book results layout last chosen on this device, by name.
+  Future<String?> catalogLayout();
+  Future<void> saveCatalogLayout(String layout);
 }
 
 typedef CatalogSaveOptions = ({

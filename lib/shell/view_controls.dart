@@ -136,6 +136,7 @@ class ShellSegmentedControl<T> extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     this.touch = false,
+    this.icons,
   });
 
   final String label;
@@ -143,6 +144,11 @@ class ShellSegmentedControl<T> extends StatelessWidget {
   final T selected;
   final ValueChanged<T> onSelected;
   final bool touch;
+
+  /// Draws each option as its icon alone, a square of the option's height,
+  /// when the icon carries the meaning; its noun becomes the option's
+  /// tooltip and accessible name.
+  final Map<T, IconData>? icons;
 
   /// The width a control with [labels] takes on one line at the ambient text
   /// scale, so a parent can tell whether it fits beside something else.
@@ -188,6 +194,7 @@ class ShellSegmentedControl<T> extends StatelessWidget {
               for (final segment in segments)
                 _Segment(
                   label: segment.label,
+                  icon: icons?[segment.value],
                   chosen: segment.value == selected,
                   height: segmentHeight,
                   onPressed: () => onSelected(segment.value),
@@ -206,9 +213,11 @@ class _Segment extends StatelessWidget {
     required this.chosen,
     required this.height,
     required this.onPressed,
+    this.icon,
   });
 
   final String label;
+  final IconData? icon;
   final bool chosen;
   final double height;
   final VoidCallback onPressed;
@@ -216,27 +225,35 @@ class _Segment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
+    final color = chosen ? palette.ink : palette.inkMuted;
+    final icon = this.icon;
     return _ShellPressable(
       onPressed: onPressed,
       current: chosen,
       radius: ShosaiTokens.radiusSm,
       color: chosen ? palette.controlRaised : null,
       shadow: chosen ? palette.menu : null,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: height),
-        child: Padding(
-          padding: _segmentPadding,
-          child: Center(
-            widthFactor: 1,
-            child: Text(
-              label,
-              style: _segmentStyle(
-                label,
-              ).copyWith(color: chosen ? palette.ink : palette.inkMuted),
+      tooltip: icon == null ? null : label,
+      semanticLabel: icon == null ? null : label,
+      child: icon == null
+          ? ConstrainedBox(
+              constraints: BoxConstraints(minHeight: height),
+              child: Padding(
+                padding: _segmentPadding,
+                child: Center(
+                  widthFactor: 1,
+                  child: Text(
+                    label,
+                    style: _segmentStyle(label).copyWith(color: color),
+                  ),
+                ),
+              ),
+            )
+          // Square, so a touch option is a whole touch target.
+          : SizedBox.square(
+              dimension: height,
+              child: Icon(icon, size: 16, color: color),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

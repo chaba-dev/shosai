@@ -1532,6 +1532,109 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('larger screens switch free books between grid and list, '
+      'and remember the choice', (tester) async {
+    final bridge = CatalogHarnessBridge(catalog);
+    Future<BrowseController> open(Size size) async {
+      HarnessView(size: size).apply(tester);
+      final controller = BrowseController(
+        bridge: bridge,
+        openLink: (_) async {},
+      );
+      addTearDown(controller.dispose);
+      final layout = ShellLayout.forWidth(size.width);
+      await tester.pumpWidget(
+        productionShell(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: controller,
+              builder: (_, _) => ShellBrowsePage(
+                layout: layout,
+                model: controller.model,
+                local: controller.local.model,
+                dispatch: controller.dispatch,
+                onChosen: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      controller.dispatch(const BrowseOpened());
+      final c = controller.model.criteria;
+      controller.dispatch(
+        BrowseChanged((
+          query: 'study',
+          filter: c.filter,
+          category: null,
+          language: null,
+          source: null,
+          author: null,
+        )),
+      );
+      await until(
+        tester,
+        () =>
+            controller.model.books.length > 3 &&
+            !controller.model.busy &&
+            !controller.model.refreshing,
+      );
+      return controller;
+    }
+
+    final rows = find.descendant(
+      of: find.byType(ShellBrowsePage),
+      matching: find.byType(ListTile),
+    );
+    final shelf = find.byWidgetPredicate(
+      (widget) =>
+          widget is ListView && widget.scrollDirection == Axis.horizontal,
+    );
+    var controller = await open(const Size(1280, 900));
+    expect(shelf, findsOneWidget);
+    expect(rows, findsNothing);
+    // Icons alone; the nouns are their tooltips and accessible names.
+    expect(find.text('List'), findsNothing);
+    expect(find.byIcon(LucideIcons.layoutList), findsOneWidget);
+    expect(find.bySemanticsLabel('List'), findsOneWidget);
+    await tester.tap(find.byTooltip('List'));
+    await tester.pump();
+    expect(controller.model.layout, BrowseLayout.list);
+    expect(shelf, findsNothing);
+    expect(rows, findsWidgets);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    expect(bridge.layout, 'list');
+
+    // A later visit starts from the saved choice.
+    await tester.pumpWidget(const SizedBox());
+    controller = await open(const Size(1280, 900));
+    expect(controller.model.layout, BrowseLayout.list);
+    expect(shelf, findsNothing);
+    expect(rows, findsWidgets);
+
+    // Phones always use rows and offer no choice.
+    await tester.pumpWidget(const SizedBox());
+    bridge.layout = 'grid';
+    await open(const Size(430, 932));
+    expect(find.byTooltip('Grid'), findsNothing);
+    expect(shelf, findsNothing);
+    expect(rows, findsWidgets);
+
+    // Choosing the grid on screen while a saved list loads keeps the grid.
+    await tester.pumpWidget(const SizedBox());
+    final slow = _DelayedLayoutBridge(catalog);
+    final early = BrowseController(bridge: slow, openLink: (_) async {});
+    addTearDown(early.dispose);
+    early.dispatch(const BrowseOpened());
+    early.dispatch(const BrowseLayoutChanged(BrowseLayout.grid));
+    slow.loading.complete();
+    await until(
+      tester,
+      () => slow.answered && !early.model.busy && !early.model.refreshing,
+    );
+    expect(early.model.layout, BrowseLayout.grid);
+    expect(slow.layout, 'grid');
+  });
+
   testWidgets(
     'Search navigation queries the local catalog and selects edition rights',
     (tester) async {
@@ -2389,6 +2492,19 @@ class _DelayedHistoryBridge extends CatalogHarnessBridge {
       await firstWrite.future;
     }
     await super.saveRecentCatalogSearches(queries);
+  }
+}
+
+class _DelayedLayoutBridge extends CatalogHarnessBridge {
+  _DelayedLayoutBridge(super.catalog);
+  final loading = Completer<void>();
+  bool answered = false;
+  // The list saved before this visit, whatever the visit writes meanwhile.
+  @override
+  Future<String?> catalogLayout() async {
+    await loading.future;
+    answered = true;
+    return 'list';
   }
 }
 

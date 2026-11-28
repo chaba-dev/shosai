@@ -1507,6 +1507,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get catalogAuthors => 'Authors';
 
   @override
+  String get catalogLayout => 'Free books layout';
+
+  @override
+  String get catalogLayoutGrid => 'Grid';
+
+  @override
+  String get catalogLayoutList => 'List';
+
+  @override
   String get catalogBrowse => 'Browse free books';
 
   @override

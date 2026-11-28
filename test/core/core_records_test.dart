@@ -212,15 +212,19 @@ void main() {
     },
   );
 
-  test('recent catalog searches persist across application restarts', () async {
+  test('recent catalog searches and the results layout persist across '
+      'application restarts', () async {
     expect(await bridge.recentCatalogSearches(), isEmpty);
+    expect(await bridge.catalogLayout(), isNull);
     await bridge.saveRecentCatalogSearches(['Pride', '夏目漱石']);
+    await bridge.saveCatalogLayout('list');
     bridge.dispose();
     await bridge.drain();
     await core.close();
     core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
     bridge = ApplicationBridge(core);
     expect(await bridge.recentCatalogSearches(), ['Pride', '夏目漱石']);
+    expect(await bridge.catalogLayout(), 'list');
     expect((await core.library.page()).books, isEmpty);
     bridge.dispose();
     await bridge.drain();
